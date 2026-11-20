@@ -1,16 +1,16 @@
 # spot-history-manager
 
-Lädt die eigene Foursquare-/Swarm-Check-in-Historie über die Foursquare API v2,
-speichert sie in SQLite und exportiert JSON/CSV. Fotos werden als Bilddateien
-mitgeladen, Kommentartexte separat nachgeladen.
+Sammelt Check-in-/Besuchshistorien aus mehreren Diensten, speichert jede Quelle
+in einer eigenen SQLite-Datenbank und baut daraus einen zentralen, rebuildbaren
+Index plus GeoJSON für eine spätere OpenStreetMap-Karte.
 
-Kein Cron, kein Hintergrunddienst: der Sync wird manuell aufgerufen, wenn neue
-Check-ins vorhanden sind.
+Aktuell implementiert: **Foursquare/Swarm** (API-Sync).
+Geplant: **Yelp** (einmaliger HTML-Import), **Google Timeline** (Import).
 
 ## Voraussetzungen
 
 - Python 3.10+ (nur Standardbibliothek, keine pip-Abhängigkeiten)
-- `.env` mit `FOURSQUARE_OAUTH_TOKEN` (OAuth-Token des eigenen Accounts)
+- `.env` mit `FOURSQUARE_OAUTH_TOKEN`
 
 ```bash
 cp .env.example .env
@@ -21,85 +21,86 @@ chmod 600 .env
 FOURSQUARE_OAUTH_TOKEN=...
 ```
 
-Die Datei sollte `chmod 600` haben und wird nicht versioniert.
-
 ## Benutzung
 
 ```bash
-# Erster Lauf: komplette Historie
-python3 -m spot_history backfill
+# Foursquare: erster Lauf (komplette Historie)
+python3 -m spot_history foursquare backfill
 
 # Später: nur Neues seit dem letzten Stand
-python3 -m spot_history sync
+./sync.sh
+# oder:
+python3 -m spot_history foursquare sync
 
 # Zusammenfassung
-python3 -m spot_history stats
+python3 -m spot_history foursquare stats
 
-# Nur offene Fotos herunterladen
-python3 -m spot_history photos
-
-# Nur Exporte neu schreiben
-python3 -m spot_history export
+# Alle Quellen in den zentralen Index + GeoJSON überführen
+python3 -m spot_history index build
 ```
 
-Optionen: `--data-dir`, `--db`, `--sleep`, `--no-photos`, `--no-export`, `--verbose`.
+Optionen beim Foursquare-Connector: `--data-dir`, `--db`, `--sleep`,
+`--no-photos`, `--no-export`, `--verbose`.
 
-`sync` entscheidet selbst: ist noch kein Backfill erfolgt, wird die komplette
-Historie geladen, sonst inkrementell ab dem gespeicherten Stand.
-
-## Was gespeichert wird
+## Datenlayout
 
 ```
 data/
-├── checkins.db      SQLite (Check-ins, Venues, Kategorien, Fotos, Kommentare, Likes, Sync-Status)
-├── checkins.json    Rohdaten aller Check-ins (JSON-Array, aufsteigend nach Zeit)
-├── checkins.csv     flache Tabelle
-├── photos.csv       Fotometadaten + lokaler Pfad + Original-URL
-├── comments.csv     Kommentartexte
-├── likes.csv        Likes inkl. Nutzernamen
-└── photos/
-    └── <checkin_id>/<photo_id>.jpg
+├── foursquare/
+│   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Kommentare, Likes, Sync-Status)
+│   ├── exports/               checkins.json/csv, photos.csv, comments.csv, likes.csv
+│   └── photos/<checkin_id>/   Bilddateien
+├── yelp/                      (kommt später) yelp.db + media/
+├── google/                    (kommt später) google.db
+├── index/index.db             zentraler, rebuildbarer Index
+└── exports/visits.geojson     Kartenpunkte aller Quellen
 ```
 
-Pro Check-in werden u. a. gespeichert: `id`, `createdAt`, UTC- und lokale Zeit,
-`timeZoneOffset`, `visibility`, `canonicalUrl`, `shout`, `isMayor`, Quelle/App,
-Venue (Name, Adresse, Stadt, Land, Koordinaten, Zeitzone, Kategorie),
-Kommentar-/Like-/Foto-Zähler, Likes samt Nutzern, Fotos (Metadaten + URL) sowie
-das vollständige Roh-JSON in `checkins.raw_json`.
+Die Quell-DBs sind die Wahrheit. Der Index wird bei jedem `index build` neu aus
+den Connectors erzeugt und kann gefahrlos gelöscht werden.
 
-Kommentartexte liefert der Check-in-Endpoint nicht mit; sie werden für Check-ins
-mit `comments.count > 0` über `/v2/checkins/<id>/comments` nachgeladen. Ob das
-erfolgt ist, merkt sich `checkins.comments_synced`.
+## Zentraler Index
 
-## Sync-Stand
+- `sources` – welche Quellen enthalten sind
+- `places` – Orte je Quelle (`source`, `source_place_id`)
+- `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
+- `photos` – Fotometadaten + lokaler Pfad
+- `index_meta` – Build-Zeitpunkt
 
-`sync_state` merkt sich unter anderem:
+`visits.geojson` ist eine `FeatureCollection` mit einem Punkt pro Visit
+(Koordinaten als `[lng, lat]`), inklusive Quelle, Ort, Kategorie, Zeit und
+lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
 
-- `last_max_created_at`: neuester verarbeiteter Check-in (Unix-Zeit)
-- `last_sync_at`: Zeitpunkt des letzten Laufs
-- `backfill_done`: ob die komplette Historie geladen wurde
-- `api_total`: von der API gemeldete Gesamtzahl
+## Foursquare-Details
 
-Der inkrementelle Lauf holt die neuesten Seiten, bis er den gespeicherten Stand
-erreicht, und schreibt neue/geänderte Check-ins per Upsert. `sync_runs` protokolliert
-jeden Lauf (Seiten, neu, aktualisiert, Fehler).
+- Check-ins: 2339 laut API, 2338 eindeutig (1 gelöscht/privat)
+- 1036 Venues, 558 Fotos, 115 Kommentare, 294 Likes
+- Zeitraum 2010-01-28 bis 2026-09-01
+- Paginierung über `beforeTimestamp` (Offset-Paging wird von Foursquare nach
+  wenigen hundert Einträgen gekappt und wiederholt dann die erste Seite)
+- Kommentartexte werden über `/v2/checkins/<id>/comments` nachgeladen
+- Der Sync-Stand (`last_max_created_at`) liegt in `sync_state`; `sync` holt nur
+  Neues und schreibt Exporte neu
+- Zusätzlich vorhanden, noch nicht importiert: `venuehistory` (1051 Venues),
+  `lists` (5), `tips` (11), alle Nutzerfotos (577 statt 558)
 
-## Technische Hinweise
+## Weitere Quellen
 
-- Paginierung beim Backfill erfolgt über `beforeTimestamp`, **nicht** über
-  `offset`: Foursquare kappt Offset-Paging nach wenigen hundert Einträgen und
-  wiederholt dann die erste Seite.
-- `limit=250` pro Request, Standardpause 0,3 s, Retries mit Backoff bei 429/5xx.
-- Bei `401` wird mit klarer Meldung abgebrochen; dann Token per OAuth-Flow
-  erneuern und `.env` aktualisieren.
-- Die API-Gesamtzahl kann minimal von der Zahl eindeutiger Check-ins abweichen
-  (gelöschte/private Einträge); der Lauf warnt in diesem Fall.
-- Fotos werden in Originalauflösung geladen. Das kann je nach Historie mehrere
-  GiB belegen; `--no-photos` überspringt den Download.
-- Das Roh-JSON enthält auch Namen von Nutzern, die Check-ins geliked haben.
+Der Connector-Vertrag steht in [`CONNECTORS.md`](CONNECTORS.md). Connectoren
+werden automatisch unter `spot_history/connectors/*` entdeckt und müssen dort
+`CONNECTOR` exportieren. Der Yelp-Import ist als Agenten-Prompt vorbereitet:
+[`prompts/yelp-import.md`](prompts/yelp-import.md). Die Foursquare-Erweiterung:
+[`prompts/foursquare-extras.md`](prompts/foursquare-extras.md).
 
 ## Tests
 
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+## Hinweise
+
+- `.env` und `data/` sind gitignored und gehören nicht ins Repository.
+- Das Roh-JSON enthält auch Namen von Nutzern, die Check-ins geliked haben.
+- Fotos werden in Originalauflösung geladen; `--no-photos` überspringt das.
+- Kein Cron/Daemon: Sync und Index werden manuell aufgerufen.

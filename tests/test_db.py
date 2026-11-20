@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from spot_history.db import Database, iso_utc, photo_url
+from spot_history.connectors.foursquare.db import Database, iso_utc, photo_url
 
 
 def make_checkin(checkin_id: str, created_at: int, **overrides):

@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import Config
+from .config import FoursquareConfig
 from .db import Database, iso_utc
 
 CHECKIN_FIELDS = [
@@ -64,8 +64,8 @@ def _date_parts(row) -> tuple[int | None, int | None, str | None]:
     return None, None, None
 
 
-def export_all(db: Database, cfg: Config, log=print) -> dict[str, Path]:
-    data_dir = cfg.data_dir
+def export_all(db: Database, cfg: FoursquareConfig, log=print) -> dict[str, Path]:
+    data_dir = cfg.exports_dir
     paths: dict[str, Path] = {}
 
     raw = [json.loads(value) for value in db.checkins_raw()]

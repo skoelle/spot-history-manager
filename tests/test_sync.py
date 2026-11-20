@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from spot_history.config import Config
-from spot_history.db import Database
-from spot_history.sync import Sync
+from spot_history.connectors.foursquare.config import FoursquareConfig
+from spot_history.connectors.foursquare.db import Database
+from spot_history.connectors.foursquare.sync import Sync
 
 
 def checkin(checkin_id: str, created_at: int):
@@ -43,7 +43,7 @@ class FakeAPI:
 class SyncTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.cfg = Config(
+        self.cfg = FoursquareConfig(
             token="dummy",
             data_dir=Path(self.tmp.name),
             download_photos=False,

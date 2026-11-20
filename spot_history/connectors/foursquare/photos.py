@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .config import Config
+from .config import FoursquareConfig
 from .db import Database, photo_url
 
 
@@ -51,7 +51,7 @@ def _fetch(url: str, dest: Path, timeout: float, retries: int = 3) -> int:
     raise RuntimeError(f"Download fehlgeschlagen: {last}")
 
 
-def download_pending(db: Database, cfg: Config, log=print, sleep: float = 0.05) -> int:
+def download_pending(db: Database, cfg: FoursquareConfig, log=print, sleep: float = 0.05) -> int:
     rows = db.pending_photos()
     total = len(rows)
     if total == 0:

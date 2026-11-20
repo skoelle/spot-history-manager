@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .api import FoursquareAPI
-from .config import Config
+from .config import FoursquareConfig
 from .db import Database, iso_now, iso_utc
 from .export import export_all
 from .photos import download_pending
@@ -23,7 +23,7 @@ class Sync:
         self,
         api: FoursquareAPI,
         db: Database,
-        cfg: Config,
+        cfg: FoursquareConfig,
         log: Callable[[str], None] = _default_log,
     ) -> None:
         self.api = api

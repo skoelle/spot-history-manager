@@ -6,4 +6,4 @@ if [ -x .venv/bin/python ]; then
 else
     PY=python3
 fi
-exec "$PY" -m spot_history sync "$@"
+exec "$PY" -m spot_history foursquare sync "$@"
