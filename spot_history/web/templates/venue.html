@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>{{ venue.name or 'Ort' }} – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>
+            <a href="/">
+                <img src="/static/favicon.svg" alt="">
+                Check-ins
+            </a>
+            <a class="nav-link" href="/venues">Orte</a>
+        </h1>
+        <div class="meta"><a href="/venues">Zurück zur Ortsliste</a></div>
+    </div>
+
+    <div class="venue-detail box">
+        <div class="venue-detail-head">
+            <div>
+                <h2>{{ venue.name or 'Unbekannter Ort' }}</h2>
+                <div class="visit-sub">
+                    {% if venue.category %}{{ venue.category }}{% endif %}
+                    {% if venue.city %} · {{ venue.city }}{% endif %}
+                    {% if venue.address %} · {{ venue.address }}{% endif %}
+                </div>
+            </div>
+            <span class="badge source-{{ venue.source }}">{{ venue.source }}</span>
+        </div>
+        <div class="venue-facts">
+            <span><strong>{{ venue.visits_count }}</strong> Besuche</span>
+            <span><strong>{{ venue.photo_count }}</strong> Fotos</span>
+            {% if venue.first_visit_label %}<span>Erster Besuch: {{ venue.first_visit_label }}</span>{% endif %}
+            {% if venue.last_visit_label %}<span>Letzter Besuch: {{ venue.last_visit_label }}</span>{% endif %}
+            {% if venue.lat is not none and venue.lng is not none %}
+            <span>{{ "%.5f"|format(venue.lat) }}, {{ "%.5f"|format(venue.lng) }}</span>
+            {% endif %}
+            {% if venue.foursquare_url %}
+            <a href="{{ venue.foursquare_url }}" target="_blank" rel="noopener">Auf Foursquare</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="list-header">
+        <span class="box-title">Besuche</span>
+        <span class="muted">{{ total }} Treffer · Seite {{ page }} von {{ pages }}</span>
+    </div>
+    <div class="visits-list">
+        {% for visit in visits %}
+        <article class="visit-card">
+            <div class="visit-date">
+                <span class="day">{{ visit.day }}</span>
+                <span class="month">{{ visit.month }}</span>
+                <span class="year">{{ visit.year }}</span>
+            </div>
+            <div class="visit-body">
+                <div class="visit-title">{{ visit.place_name or venue.name or 'Unbekannter Ort' }}</div>
+                <div class="visit-sub">
+                    {% if visit.category %}{{ visit.category }}{% endif %}
+                    {% if visit.city %} · {{ visit.city }}{% endif %}
+                </div>
+                {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}
+            </div>
+            <div class="visit-meta">
+                {% if visit.photo_count %}
+                <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
+                {% endif %}
+                <span class="visit-time">{{ visit.time }}</span>
+                {% if visit.source_url %}
+                <a class="original-link" href="{{ visit.source_url }}" target="_blank" rel="noopener">Original</a>
+                {% endif %}
+            </div>
+        </article>
+        {% else %}
+        <div class="empty-state">Keine Besuche für diesen Ort.</div>
+        {% endfor %}
+    </div>
+    <div class="pagination">
+        {% if prev_url %}<a class="button" href="{{ prev_url }}">Zurück</a>{% endif %}
+        <span class="muted">Seite {{ page }} von {{ pages }}</span>
+        {% if next_url %}<a class="button" href="{{ next_url }}">Weiter</a>{% endif %}
+    </div>
+</div>
+</body>
+</html>

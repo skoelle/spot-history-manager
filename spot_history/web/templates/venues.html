@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Orte – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>
+            <a href="/">
+                <img src="/static/favicon.svg" alt="">
+                Check-ins
+            </a>
+            <a class="nav-link" href="/venues">Orte</a>
+        </h1>
+        <div class="meta">{{ total }} Orte{% if profile %} · {{ profile.display_name }}{% endif %}</div>
+    </div>
+
+    {% if index_missing %}
+    <div class="empty-state">
+        Der Index fehlt unter <code>{{ index_path }}</code>.<br>
+        Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
+    </div>
+    {% else %}
+    <form class="filters box" method="get" action="/venues">
+        <label class="field">
+            <span>Stadt</span>
+            <select name="city">
+                <option value="">Alle Städte</option>
+                {% for option in options.cities %}
+                <option value="{{ option.value }}" {% if option.value == query.city %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Kategorie</span>
+            <select name="category">
+                <option value="">Alle Kategorien</option>
+                {% for option in options.categories %}
+                <option value="{{ option.value }}" {% if option.value == query.category %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Quelle</span>
+            <select name="source">
+                <option value="">Alle Quellen</option>
+                {% for option in options.sources %}
+                <option value="{{ option.value }}" {% if option.value == query.source %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field field-search">
+            <span>Suche</span>
+            <input type="search" name="q" value="{{ query.q }}" placeholder="Ort, Kategorie, Adresse, Stadt ...">
+        </label>
+        <div class="filter-actions">
+            <button type="submit">Suchen</button>
+            <a class="reset-link" href="/venues">Zurücksetzen</a>
+        </div>
+    </form>
+
+    <div class="list-header">
+        <span class="box-title">Orte</span>
+        <span class="muted">{{ total }} Treffer · Seite {{ page }} von {{ pages }}</span>
+    </div>
+
+    <div class="box venue-table-wrap">
+        <table class="venue-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Stadt</th>
+                    <th>Kategorie</th>
+                    <th class="num">Besuche</th>
+                    <th>Letzter Besuch</th>
+                    <th>Quelle</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for venue in venues %}
+                <tr>
+                    <td><a href="/venues/{{ venue.id }}">{{ venue.name or 'Unbekannter Ort' }}</a></td>
+                    <td>{{ venue.city or '—' }}</td>
+                    <td>{{ venue.category or '—' }}</td>
+                    <td class="num">{{ venue.visits_count }}</td>
+                    <td>{{ venue.last_visit_label or '—' }}</td>
+                    <td><span class="badge source-{{ venue.source }}">{{ venue.source }}</span></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="empty-state">Keine Orte für diese Filter.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pagination">
+        {% if prev_url %}<a class="button" href="{{ prev_url }}">Zurück</a>{% endif %}
+        <span class="muted">Seite {{ page }} von {{ pages }}</span>
+        {% if next_url %}<a class="button" href="{{ next_url }}">Weiter</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>

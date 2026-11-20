@@ -43,6 +43,20 @@ TIP_FIELDS = [
     "id", "created_at", "created_at_utc", "venue_id", "venue_name", "text",
 ]
 
+PROFILE_FIELDS = [
+    "id", "display_name", "first_name", "last_name", "handle", "home_city",
+    "country_code", "gender", "relationship", "bio", "photo_path",
+    "canonical_url", "created_at", "checkins_count", "friends_count",
+    "followers_count", "following_count", "lists_count", "photos_count",
+    "tips_count", "mayorships_count", "updated_at",
+]
+
+VENUE_FIELDS = [
+    "id", "name", "lat", "lng", "address", "city", "state", "postal_code",
+    "country", "country_code", "category_name", "time_zone", "created_at",
+    "closed", "updated_at",
+]
+
 
 def _write_json(path: Path, payload) -> None:
     tmp = path.with_name(path.name + ".tmp")
@@ -178,8 +192,39 @@ def export_all(db: Database, cfg: FoursquareConfig, log=print) -> dict[str, Path
     _write_csv(path, TIP_FIELDS, rows)
     paths["tips_csv"] = path
 
+    profile = db.user_profile()
+    rows = []
+    if profile:
+        rows.append([
+            profile["id"], profile["display_name"], profile["first_name"],
+            profile["last_name"], profile["handle"], profile["home_city"],
+            profile["country_code"], profile["gender"], profile["relationship"],
+            profile["bio"], profile["photo_path"], profile["canonical_url"],
+            profile["created_at"], profile["checkins_count"],
+            profile["friends_count"], profile["followers_count"],
+            profile["following_count"], profile["lists_count"],
+            profile["photos_count"], profile["tips_count"],
+            profile["mayorships_count"], profile["updated_at"],
+        ])
+    path = data_dir / "user_profile.csv"
+    _write_csv(path, PROFILE_FIELDS, rows)
+    paths["user_profile_csv"] = path
+
+    rows = [
+        [
+            row["id"], row["name"], row["lat"], row["lng"], row["address"],
+            row["city"], row["state"], row["postal_code"], row["country"],
+            row["country_code"], row["category_name"], row["time_zone"],
+            row["created_at"], row["closed"], row["updated_at"],
+        ]
+        for row in db.venue_rows()
+    ]
+    path = data_dir / "venues.csv"
+    _write_csv(path, VENUE_FIELDS, rows)
+    paths["venues_csv"] = path
+
     log(
         f"Export: {len(raw)} Check-ins, {len(like_rows)} Likes, "
-        f"{len(rows)} Tipps -> {data_dir}"
+        f"{len(db.tip_rows())} Tipps, {len(rows)} Venues -> {data_dir}"
     )
     return paths

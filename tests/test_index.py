@@ -15,6 +15,18 @@ class FakeConnector(BaseConnector):
     name = "fake"
     kind = "import"
 
+    def iter_profile(self):
+        return {
+            "source": "fake",
+            "source_profile_id": "u1",
+            "display_name": "Test User",
+            "home_city": "München",
+            "country_code": "DE",
+            "photo_path": "data/fake/profile/u1.jpg",
+            "counts": {"checkins": 2, "photos": 1},
+            "updated_at": "2026-11-20T00:00:00+00:00",
+        }
+
     def iter_visits(self):
         yield Visit(
             source="fake",
@@ -71,12 +83,18 @@ class IndexTest(unittest.TestCase):
                 places = conn.execute("SELECT COUNT(*) FROM places").fetchone()[0]
                 photos = conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
                 sources = conn.execute("SELECT name, visits FROM sources").fetchall()
+                profiles = conn.execute(
+                    "SELECT source, display_name, counts_json FROM source_profiles"
+                ).fetchall()
             finally:
                 conn.close()
             self.assertEqual(visits, 2)
             self.assertEqual(places, 1)
             self.assertEqual(photos, 1)
             self.assertEqual(sources, [("fake", 2)])
+            self.assertEqual(profiles[0][0], "fake")
+            self.assertEqual(profiles[0][1], "Test User")
+            self.assertIn('"checkins": 2', profiles[0][2])
 
             payload = json.loads(Path(paths.map_geojson).read_text(encoding="utf-8"))
             self.assertEqual(payload["type"], "FeatureCollection")

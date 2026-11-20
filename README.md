@@ -36,6 +36,9 @@ python3 -m spot_history foursquare sync
 # Zusammenfassung
 python3 -m spot_history foursquare stats
 
+# API-Endpunkte nur lesend prüfen (ohne Places API)
+python3 -m spot_history foursquare probe
+
 # Alle Quellen in den zentralen Index + GeoJSON überführen
 python3 -m spot_history index build
 
@@ -45,17 +48,19 @@ python3 -m spot_history index build
 ```
 
 Optionen beim Foursquare-Connector: `--data-dir`, `--db`, `--sleep`,
-`--no-photos`, `--no-export`, `--verbose`. Die Web-Oberfläche liest nur den
-Index; `index build` läuft getrennt davor.
+`--no-photos`, `--no-export`, `--verbose`. `probe` ist rein lesend und schreibt
+keine Daten. Die Web-Oberfläche liest nur den Index; `index build` läuft
+getrennt davor.
 
 ## Datenlayout
 
 ```
 data/
 ├── foursquare/
-│   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Kommentare, Likes, Sync-Status)
-│   ├── exports/               checkins.json/csv, photos.csv, comments.csv, likes.csv
-│   └── photos/<checkin_id>/   Bilddateien
+│   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Listen, Tipps, Profil, Sync-Status)
+│   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues (CSV)
+│   ├── profile/               lokales Profilbild
+│   └── photos/<checkin_id>/   Bilddateien (Standalone unter photos/_standalone/)
 ├── yelp/                      yelp.db + media/ (HTML-Import)
 ├── google/                    (kommt später) google.db
 ├── index/index.db             zentraler, rebuildbarer Index
@@ -74,13 +79,24 @@ OpenStreetMap-Tiles (Leaflet liegt lokal unter
 `spot_history/web/static/vendor/leaflet/`), darunter die Liste mit 60 Treffern
 pro Seite. Klick auf Karte und Liste ist synchronisiert.
 
+Zusätzlich gibt es eine Profilkarte mit lokal gespeichertem Avatar sowie eine
+Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{id}`.
+Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl, ersten und
+letzten Besuch, Fotoanzahl und die Besuchshistorie. Foursquare-Orte verlinken
+auf ihr Original.
+
+Lokale Bilder werden über `/media/...` ausgeliefert. Erlaubt sind nur Bilddateien
+unter `data/*/profile/`, `data/*/photos/` und `data/*/media/`; Datenbanken,
+Exporte und Pfad-Traversal werden blockiert.
+
 Die Oberfläche hat **keine Authentifizierung** und ist für LAN/interne Nutzung
-gedacht. Fotos werden noch nicht als Thumbnails angezeigt, nur ihre Anzahl und
-der Link zum Original.
+gedacht. Fotos werden noch nicht als Thumbnails in der Check-in-Liste angezeigt,
+nur ihre Anzahl und der Link zum Original; der Profil-Avatar ist sichtbar.
 
 ## Zentraler Index
 
 - `sources` – welche Quellen enthalten sind
+- `source_profiles` – Anzeigename, Home City, Avatar und Zähler je Quelle
 - `places` – Orte je Quelle (`source`, `source_place_id`)
 - `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
 - `photos` – Fotometadaten + lokaler Pfad
@@ -102,8 +118,19 @@ lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
 - Der Sync-Stand (`last_max_created_at`) liegt in `sync_state`; `sync` holt nur
   Neues und schreibt Exporte neu
 - Zusätzlich importiert: `venuehistory` (1029 von 1051 API-Venues), `lists`
-  (5 Listen, ~150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
+  (5 Listen, 150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
   (11) und alle Nutzerfotos (577; 562 mit Check-in, 15 standalone)
+- Nutzerprofil inklusive Zählern und lokal gespeichertem Avatar
+  (`data/foursquare/profile/`)
+- Bekannte API-Lücken werden in `sync_diagnostics` dokumentiert und in `stats`
+  angezeigt
+- Venue-Details (Öffnungszeiten, Preis, Rating, Venue-Fotos/-Tipps) sind aktuell
+  nicht abrufbar: `/v2/venues/{id}` liefert 402, die Places-API mit
+  Premium-Feldern 429. Die 1036 Venue-Snapshots aus den Check-ins reichen für
+  Liste und Detailseite.
+- `foursquare probe` prüft die Konto-Endpunkte rein lesend; `friends`/`badges`
+  liefern 404, `events` 403, `likes`/`herenow` 402. Die Places-API wird bewusst
+  nicht geprüft.
 
 ## Yelp-Import
 

@@ -8,7 +8,7 @@ from .api import AuthError, FoursquareAPI
 from .config import FoursquareConfig
 from .db import Database, iso_now, iso_utc
 from .export import export_all
-from .photos import download_pending
+from .photos import download_pending, download_profile_photo
 
 MAX_PAGES = 200
 PHOTO_PAGE_LIMIT = 500
@@ -183,10 +183,12 @@ class Sync:
         photos = 0
         if self.cfg.download_photos:
             photos = download_pending(self.db, self.cfg, log=self.log)
+        self.write_diagnostics()
         return comments, photos
 
     def sync_extras(self) -> None:
         for name, func in (
+            ("Profil", self.sync_profile),
             ("Fotos", self.sync_all_photos),
             ("Venue-History", self.sync_venue_history),
             ("Listen", self.sync_lists),
@@ -198,6 +200,17 @@ class Sync:
                 raise
             except Exception as exc:
                 self.log(f"{name}: übersprungen ({exc})")
+
+    def sync_profile(self) -> None:
+        user = self.api.self_user()
+        photo_path = None
+        if self.cfg.download_photos:
+            photo_path = download_profile_photo(self.cfg, user, log=self.log)
+        self.db.upsert_user_profile(user, photo_path)
+        self.log(
+            f"Profil: {user.get('displayName') or user.get('id')}"
+            f"{' (mit Bild)' if photo_path else ''}"
+        )
 
     def sync_all_photos(self) -> int:
         seen: set[str] = set()
@@ -225,6 +238,7 @@ class Sync:
             )
             offset += len(items)
             time.sleep(self.cfg.sleep)
+        self.db.set_state("photos_unique_total", len(seen))
         if api_total is not None:
             self.db.set_state("photos_api_total", api_total)
             if api_total != len(seen):
@@ -350,6 +364,51 @@ class Sync:
             if api_total != len(seen):
                 self.log(f"Tipps: {len(seen)} eindeutig, API meldet {api_total}")
         return len(seen)
+
+    def write_diagnostics(self) -> None:
+        stats = self.db.stats()
+        checkin_total = self.db.get_int_state("api_total")
+        checkin_missing = max(0, checkin_total - stats["total"])
+        self.db.set_diagnostic(
+            "checkins",
+            checkin_total or None,
+            stats["total"],
+            "1 gelöscht/privat" if checkin_missing == 1 else None,
+        )
+
+        photos_api = self.db.get_int_state("photos_api_total")
+        photos_unique = self.db.get_int_state("photos_unique_total")
+        note = None
+        if photos_unique and photos_api and photos_unique != photos_api:
+            note = f"{photos_unique} eindeutige API-IDs"
+        self.db.set_diagnostic(
+            "photos", photos_api or None, stats["photos_total"], note
+        )
+
+        venue_api = self.db.get_int_state("venue_history_total")
+        self.db.set_diagnostic(
+            "venue_history",
+            venue_api or None,
+            stats["venue_history"],
+            "API liefert weniger als count"
+            if venue_api and stats["venue_history"] < venue_api else None,
+        )
+        list_api = self.db.list_items_api_count()
+        self.db.set_diagnostic(
+            "list_items",
+            list_api or None,
+            stats["list_items"],
+            "API liefert weniger als count"
+            if list_api and stats["list_items"] < list_api else None,
+        )
+        self.db.set_diagnostic(
+            "tips",
+            self.db.get_int_state("tips_total") or None,
+            stats["tips"],
+        )
+        self.db.set_diagnostic(
+            "venue_details", None, None, "blocked: 402/429, keine Credits"
+        )
 
     def fetch_comments(self) -> int:
         pending = self.db.pending_comment_checkins()

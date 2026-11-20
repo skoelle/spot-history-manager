@@ -6,8 +6,46 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from ...core.config import ROOT
 from .config import FoursquareConfig
 from .db import Database, photo_url
+
+
+def _relative_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def profile_photo_url(photo: dict) -> str:
+    prefix = photo.get("prefix") or ""
+    suffix = photo.get("suffix") or ""
+    if not prefix or not suffix:
+        return ""
+    return f"{prefix}300x300{suffix}"
+
+
+def download_profile_photo(
+    cfg: FoursquareConfig, user: dict, log=print
+) -> str | None:
+    photo = user.get("photo") or {}
+    url = profile_photo_url(photo)
+    if not url:
+        return None
+    user_id = str(user.get("id") or "self")
+    suffix = Path(photo.get("suffix") or "").suffix
+    extension = suffix if suffix and len(suffix) <= 6 else ".jpg"
+    dest = cfg.data_dir / "profile" / f"{user_id}{extension}"
+    if dest.exists() and dest.stat().st_size > 0:
+        return _relative_path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _fetch(url, dest, cfg.timeout)
+    except Exception as exc:
+        log(f"Profilbild: Download fehlgeschlagen ({exc})")
+        return None
+    return _relative_path(dest)
 
 
 def _extension(row) -> str:

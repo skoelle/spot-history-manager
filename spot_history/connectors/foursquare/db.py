@@ -191,6 +191,43 @@ CREATE TABLE IF NOT EXISTS tips (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tips_created_at ON tips(created_at);
+
+CREATE TABLE IF NOT EXISTS user_profile (
+    id TEXT PRIMARY KEY,
+    display_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    handle TEXT,
+    home_city TEXT,
+    country_code TEXT,
+    gender TEXT,
+    relationship TEXT,
+    bio TEXT,
+    photo_prefix TEXT,
+    photo_suffix TEXT,
+    photo_path TEXT,
+    canonical_url TEXT,
+    created_at INTEGER,
+    checkins_count INTEGER NOT NULL DEFAULT 0,
+    friends_count INTEGER NOT NULL DEFAULT 0,
+    followers_count INTEGER NOT NULL DEFAULT 0,
+    following_count INTEGER NOT NULL DEFAULT 0,
+    lists_count INTEGER NOT NULL DEFAULT 0,
+    photos_count INTEGER NOT NULL DEFAULT 0,
+    tips_count INTEGER NOT NULL DEFAULT 0,
+    mayorships_count INTEGER NOT NULL DEFAULT 0,
+    raw_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_diagnostics (
+    scope TEXT PRIMARY KEY,
+    api_count INTEGER,
+    stored_count INTEGER,
+    missing_count INTEGER,
+    checked_at TEXT NOT NULL,
+    note TEXT
+);
 """
 
 CHECKIN_COLUMNS = [
@@ -292,6 +329,37 @@ ON CONFLICT(id) DO UPDATE SET
     raw_json=excluded.raw_json
 """
 
+PROFILE_COLUMNS = [
+    "id", "display_name", "first_name", "last_name", "handle", "home_city",
+    "country_code", "gender", "relationship", "bio", "photo_prefix",
+    "photo_suffix", "photo_path", "canonical_url", "created_at",
+    "checkins_count", "friends_count", "followers_count", "following_count",
+    "lists_count", "photos_count", "tips_count", "mayorships_count",
+    "raw_json", "updated_at",
+]
+
+PROFILE_SQL = (
+    f"INSERT INTO user_profile ({', '.join(PROFILE_COLUMNS)}) "
+    f"VALUES ({', '.join('?' for _ in PROFILE_COLUMNS)}) "
+    "ON CONFLICT(id) DO UPDATE SET "
+    + ", ".join(
+        f"{column}=excluded.{column}"
+        for column in PROFILE_COLUMNS
+        if column not in ("id", "photo_path")
+    )
+    + ", photo_path=COALESCE(excluded.photo_path, user_profile.photo_path)"
+)
+
+DIAGNOSTIC_SQL = """
+INSERT INTO sync_diagnostics (
+    scope, api_count, stored_count, missing_count, checked_at, note
+) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(scope) DO UPDATE SET
+    api_count=excluded.api_count, stored_count=excluded.stored_count,
+    missing_count=excluded.missing_count, checked_at=excluded.checked_at,
+    note=excluded.note
+"""
+
 
 def iso_utc(timestamp: int | float) -> str:
     return datetime.fromtimestamp(int(timestamp), timezone.utc).isoformat(timespec="seconds")
@@ -305,6 +373,13 @@ def iso_local(timestamp: int | float, offset_minutes: int | None) -> str:
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def nested_count(payload: dict[str, Any], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, dict):
+        return int(value.get("count") or 0)
+    return 0
 
 
 def photo_url(photo: dict[str, Any]) -> str:
@@ -719,6 +794,70 @@ class Database:
                 count += 1
         return count
 
+    def upsert_user_profile(
+        self, user: dict[str, Any], photo_path: str | None = None
+    ) -> None:
+        photo = user.get("photo") or {}
+        values = [
+            str(user.get("id") or ""),
+            user.get("displayName"),
+            user.get("firstName"),
+            user.get("lastName"),
+            user.get("handle"),
+            user.get("homeCity"),
+            user.get("countryCode"),
+            user.get("gender"),
+            user.get("relationship"),
+            user.get("bio"),
+            photo.get("prefix"),
+            photo.get("suffix"),
+            photo_path,
+            user.get("canonicalUrl"),
+            user.get("createdAt"),
+            nested_count(user, "checkins"),
+            nested_count(user, "friends"),
+            nested_count(user, "followers"),
+            nested_count(user, "following"),
+            nested_count(user, "lists"),
+            nested_count(user, "photos"),
+            nested_count(user, "tips"),
+            nested_count(user, "mayorships"),
+            json.dumps(user, ensure_ascii=False, separators=(",", ":")),
+            iso_now(),
+        ]
+        with self.conn:
+            self.conn.execute(PROFILE_SQL, values)
+
+    def user_profile(self) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM user_profile ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+
+    def set_diagnostic(
+        self,
+        scope: str,
+        api_count: int | None,
+        stored_count: int | None,
+        note: str | None = None,
+    ) -> None:
+        missing = None
+        if api_count is not None and stored_count is not None:
+            missing = max(0, int(api_count) - int(stored_count))
+        self.conn.execute(
+            DIAGNOSTIC_SQL,
+            (scope, api_count, stored_count, missing, iso_now(), note),
+        )
+        self.conn.commit()
+
+    def diagnostics(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM sync_diagnostics ORDER BY scope"
+        ).fetchall()
+
+    def list_items_api_count(self) -> int:
+        row = self.conn.execute("SELECT SUM(count) AS value FROM lists").fetchone()
+        return int(row["value"] or 0)
+
     def pending_photos(self) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM photos WHERE downloaded_path IS NULL OR downloaded_path='' "
@@ -812,6 +951,11 @@ class Database:
             "SELECT * FROM tips ORDER BY created_at"
         ).fetchall()
 
+    def venue_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM venues ORDER BY name"
+        ).fetchall()
+
     def stats(self) -> dict[str, Any]:
         conn = self.conn
         total = conn.execute("SELECT COUNT(*) AS v FROM checkins").fetchone()["v"]
@@ -843,6 +987,7 @@ class Database:
             "SELECT venue_name AS name, COUNT(*) AS n FROM checkins "
             "WHERE venue_name IS NOT NULL GROUP BY venue_name ORDER BY n DESC LIMIT 10"
         ).fetchall()
+        profile = self.user_profile()
         return {
             "total": total,
             "oldest": bounds["lo"],
@@ -860,6 +1005,8 @@ class Database:
             "top_categories": top_categories,
             "top_cities": top_cities,
             "top_venues": top_venues,
+            "profile_name": profile["display_name"] if profile else None,
+            "diagnostics": self.diagnostics(),
             "last_max_created_at": self.get_int_state("last_max_created_at"),
             "last_sync_at": self.get_state("last_sync_at"),
             "backfill_done": self.get_state("backfill_done"),

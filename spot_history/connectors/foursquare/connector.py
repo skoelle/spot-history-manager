@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 from pathlib import Path
 
@@ -33,6 +34,7 @@ class FoursquareConnector(BaseConnector):
             ("photos", "offene Fotos herunterladen"),
             ("export", "JSON/CSV aus der Datenbank schreiben"),
             ("stats", "Zusammenfassung anzeigen"),
+            ("probe", "API-Endpunkte nur lesend prüfen"),
         ):
             sub = commands.add_parser(command, parents=[common], help=help_text)
             sub.set_defaults(func=self.run)
@@ -67,15 +69,19 @@ class FoursquareConnector(BaseConnector):
                 export_all(db, config)
                 return 0
 
+            is_probe = args.command == "probe"
             api = FoursquareAPI(
                 token=config.token,
                 version=config.api_version,
                 base_url=config.base_url,
                 timeout=config.timeout,
                 sleep=config.sleep,
-                retries=config.retries,
+                retries=1 if is_probe else config.retries,
                 verbose=config.verbose,
             )
+            if is_probe:
+                self.probe(api, db)
+                return 0
             sync = Sync(api, db, config)
             if args.command == "backfill":
                 sync.run("backfill")
@@ -85,6 +91,55 @@ class FoursquareConnector(BaseConnector):
             return 0
         finally:
             db.close()
+
+    @staticmethod
+    def _probe_status(exc: Exception) -> str:
+        text = str(exc)
+        for code in ("401", "402", "403", "404", "429"):
+            if text.startswith(code) or f"({code})" in text or f"{code}:" in text:
+                return code
+        return "ERR"
+
+    def probe(self, api, db) -> None:
+        from .api import ApiError, AuthError
+
+        print("API-Probe (nur lesend):", flush=True)
+        endpoints = [
+            "users/self",
+            "users/self/checkins",
+            "users/self/photos",
+            "users/self/venuehistory",
+            "users/self/lists",
+            "users/self/tips",
+            "users/self/mayorships",
+            "users/self/todos",
+            "users/self/friends",
+            "users/self/badges",
+            "users/self/events",
+            "users/self/likes",
+            "users/self/herenow",
+        ]
+        row = db.conn.execute(
+            "SELECT venue_id FROM checkins WHERE venue_id IS NOT NULL LIMIT 1"
+        ).fetchone()
+        if row:
+            endpoints.append(f"venues/{row['venue_id']}")
+        for path in endpoints:
+            params = {} if path == "users/self" else {"limit": "1"}
+            if path.startswith("venues/"):
+                params = {}
+            try:
+                api._request(path, params)
+                status = "OK"
+            except (AuthError, ApiError) as exc:
+                status = self._probe_status(exc)
+            except Exception:
+                status = "ERR"
+            print(f"  {path:<32} {status}", flush=True)
+        print(
+            "Hinweis: Places API wird bewusst nicht geprüft.",
+            flush=True,
+        )
 
     @staticmethod
     def print_stats(db) -> None:
@@ -103,12 +158,29 @@ class FoursquareConnector(BaseConnector):
         print(f"Venue-History:    {stats['venue_history']}")
         print(f"Listen:           {stats['lists']} ({stats['list_items']} Einträge)")
         print(f"Tipps:            {stats['tips']}")
+        if stats["profile_name"]:
+            print(f"Profil:           {stats['profile_name']}")
         print(f"Letzter Sync:     {stats['last_sync_at'] or '-'}")
         if stats["last_max_created_at"]:
             print(f"Daten bis:        {iso_utc(stats['last_max_created_at'])}")
         print(f"Backfill fertig:  {'ja' if stats['backfill_done'] == '1' else 'nein'}")
         if stats["api_total"]:
             print(f"API-Gesamtzahl:   {stats['api_total']}")
+        if stats["diagnostics"]:
+            print("\nDatenlücken:")
+            for diag in stats["diagnostics"]:
+                if diag["api_count"] is None:
+                    print(f"  {diag['scope']:<14} {diag['note'] or '-'}")
+                    continue
+                line = (
+                    f"  {diag['scope']:<14} {diag['stored_count']}/"
+                    f"{diag['api_count']}"
+                )
+                if diag["missing_count"]:
+                    line += f" ({diag['missing_count']} fehlend)"
+                if diag["note"]:
+                    line += f" · {diag['note']}"
+                print(line)
         for label, key in (
             ("Top Kategorien", "top_categories"),
             ("Top Städte", "top_cities"),
@@ -178,6 +250,53 @@ class FoursquareConnector(BaseConnector):
                 )
         finally:
             conn.close()
+
+    def iter_profile(self):
+        from .config import build_config
+
+        config = build_config(require_token=False)
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            return None
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM user_profile ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        finally:
+            conn.close()
+        if not row:
+            return None
+        counts = {
+            key: int(row[f"{key}_count"] or 0)
+            for key in (
+                "checkins", "friends", "followers", "following", "lists",
+                "photos", "tips", "mayorships",
+            )
+        }
+        photo_path = row["photo_path"]
+        if photo_path:
+            absolute = Path(photo_path)
+            if not absolute.is_absolute():
+                absolute = ROOT / absolute
+            try:
+                photo_path = str(absolute.relative_to(ROOT))
+            except ValueError:
+                photo_path = str(absolute)
+        return {
+            "source": SOURCE,
+            "source_profile_id": row["id"],
+            "display_name": row["display_name"],
+            "home_city": row["home_city"],
+            "country_code": row["country_code"],
+            "photo_path": photo_path,
+            "counts": counts,
+            "updated_at": row["updated_at"],
+            "counts_json": json.dumps(counts, ensure_ascii=False),
+        }
 
 
 CONNECTOR = FoursquareConnector()

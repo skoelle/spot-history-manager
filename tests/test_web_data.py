@@ -13,6 +13,18 @@ class FakeConnector(BaseConnector):
     name = "fake"
     kind = "import"
 
+    def iter_profile(self):
+        return {
+            "source": "fake",
+            "source_profile_id": "u1",
+            "display_name": "Test User",
+            "home_city": "München",
+            "country_code": "DE",
+            "photo_path": None,
+            "counts": {"checkins": 3, "photos": 0},
+            "updated_at": "2026-11-20T00:00:00+00:00",
+        }
+
     def iter_visits(self):
         yield Visit(
             source="fake",
@@ -83,6 +95,32 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(web_data.count_visits(self.conn, beer), 1)
         search = web_data.Filters(q="Berlin")
         self.assertEqual(web_data.count_visits(self.conn, search), 1)
+
+    def test_profiles_and_venues(self):
+        profiles = web_data.load_profiles(self.conn)
+        self.assertEqual(len(profiles), 1)
+        self.assertEqual(profiles[0]["display_name"], "Test User")
+        self.assertEqual(profiles[0]["initials"], "TU")
+        self.assertEqual(profiles[0]["counts"]["checkins"], 3)
+
+        venues = web_data.query_venues(
+            self.conn, web_data.VenueFilters(), limit=10, offset=0
+        )
+        self.assertEqual(len(venues), 3)
+        self.assertEqual(web_data.count_venues(self.conn, web_data.VenueFilters()), 3)
+
+        munich = web_data.VenueFilters(city="München")
+        self.assertEqual(web_data.count_venues(self.conn, munich), 2)
+        self.assertEqual(web_data.load_venue_options(self.conn)["cities"][0]["value"], "München")
+
+        venue = web_data.get_venue(self.conn, venues[0]["id"])
+        self.assertIsNotNone(venue)
+        self.assertEqual(venue["id"], venues[0]["id"])
+        self.assertEqual(venue["visits_count"], 1)
+        visits = web_data.query_visits(
+            self.conn, web_data.Filters(place_id=venue["id"]), limit=10, offset=0
+        )
+        self.assertEqual(len(visits), 1)
 
     def test_map_points_and_pagination(self):
         filters = web_data.Filters()

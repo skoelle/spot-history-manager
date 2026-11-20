@@ -16,6 +16,7 @@
                 <img src="/static/favicon.svg" alt="">
                 Check-ins
             </a>
+            <a class="nav-link" href="/venues">Orte</a>
         </h1>
         <div class="meta">
             {% if city_value %}{{ city_value }} · {% endif %}{{ stats.total }} Besuche
@@ -29,6 +30,27 @@
         Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
     </div>
     {% else %}
+    {% if profile %}
+    <div class="profile-card box">
+        <div class="profile-avatar">
+            {% if profile.photo_path %}
+            <img src="/media/{{ profile.photo_path }}" alt="">
+            {% else %}
+            <span>{{ profile.initials }}</span>
+            {% endif %}
+        </div>
+        <div class="profile-body">
+            <div class="profile-name">{{ profile.display_name }}</div>
+            {% if profile.home_city %}<div class="profile-city">{{ profile.home_city }}</div>{% endif %}
+            <div class="profile-counts">
+                <span><strong>{{ profile.counts.get('checkins', 0) }}</strong> Check-ins</span>
+                <span><strong>{{ profile.counts.get('photos', 0) }}</strong> Fotos</span>
+                <span><strong>{{ profile.counts.get('tips', 0) }}</strong> Tips</span>
+                <span><strong>{{ profile.counts.get('lists', 0) }}</strong> Listen</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
     <div class="stat-grid">
         <div class="box stat-box">
             <div class="box-title">Besuche</div>

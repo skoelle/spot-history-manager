@@ -4,8 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from spot_history.connectors.foursquare.api import AuthError
+from spot_history.connectors.foursquare.api import ApiError, AuthError
 from spot_history.connectors.foursquare.config import FoursquareConfig
+from spot_history.connectors.foursquare.connector import CONNECTOR
 from spot_history.connectors.foursquare.db import Database
 from spot_history.connectors.foursquare.photos import photo_destination
 from spot_history.connectors.foursquare.sync import Sync
@@ -57,6 +58,33 @@ class FakeAPI:
         self.tip_total: int | None = None
         self.tip_offsets: list[int] = []
         self.fail: dict[str, Exception] = {}
+        self.profile: dict = {
+            "id": "185614",
+            "displayName": "Stefan Koelle",
+            "firstName": "Stefan",
+            "lastName": "Koelle",
+            "handle": "stefankoelle",
+            "homeCity": "Munich, Germany",
+            "countryCode": "DE",
+            "bio": "",
+            "photo": {
+                "prefix": "https://example.invalid/user/",
+                "suffix": "/avatar.jpg",
+            },
+            "checkins": {"count": 2339},
+            "friends": {"count": 159},
+            "followers": {"count": 196},
+            "following": {"count": 183},
+            "lists": {"count": 5},
+            "photos": {"count": 577},
+            "tips": {"count": 11},
+            "mayorships": {"count": 0},
+        }
+
+    def self_user(self):
+        if "profile" in self.fail:
+            raise self.fail["profile"]
+        return self.profile
 
     def photos(self, limit=500, offset=0):
         if "photos" in self.fail:
@@ -260,6 +288,35 @@ class ExtrasTest(unittest.TestCase):
         self.assertEqual(self.db.stats()["tips"], 3)
         self.assertEqual(self.api.tip_offsets, [0, 2, 3])
 
+    def test_profile_is_persisted_without_photo_download(self):
+        self.sync.sync_profile()
+        profile = self.db.user_profile()
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["id"], "185614")
+        self.assertEqual(profile["display_name"], "Stefan Koelle")
+        self.assertEqual(profile["checkins_count"], 2339)
+        self.assertEqual(profile["friends_count"], 159)
+        self.assertEqual(profile["lists_count"], 5)
+        self.assertIsNone(profile["photo_path"])
+        self.assertEqual(self.db.stats()["profile_name"], "Stefan Koelle")
+
+    def test_diagnostics_record_known_gaps(self):
+        self.db.set_state("api_total", 5)
+        self.db.set_state("photos_api_total", 4)
+        self.db.set_state("photos_unique_total", 3)
+        self.db.set_state("venue_history_total", 3)
+        self.db.set_state("tips_total", 1)
+        self.sync.write_diagnostics()
+        diagnostics = {row["scope"]: row for row in self.db.diagnostics()}
+        self.assertEqual(diagnostics["checkins"]["stored_count"], 1)
+        self.assertEqual(diagnostics["checkins"]["missing_count"], 4)
+        self.assertEqual(
+            diagnostics["photos"]["note"], "3 eindeutige API-IDs"
+        )
+        self.assertEqual(
+            diagnostics["venue_details"]["note"], "blocked: 402/429, keine Credits"
+        )
+
     def test_extras_continue_after_error(self):
         self.api.fail["photos"] = RuntimeError("kaputt")
         self.api.venue_pages = {
@@ -268,6 +325,23 @@ class ExtrasTest(unittest.TestCase):
         }
         self.sync.sync_extras()
         self.assertEqual(self.db.stats()["venue_history"], 1)
+
+    def test_probe_status_mapping(self):
+        self.assertEqual(CONNECTOR._probe_status(ApiError("402: Credits exhausted")), "402")
+        self.assertEqual(CONNECTOR._probe_status(ApiError("404: missing")), "404")
+        self.assertEqual(
+            CONNECTOR._probe_status(
+                ApiError("Anfrage nach 1 Versuchen fehlgeschlagen: 429: slow down")
+            ),
+            "429",
+        )
+        self.assertEqual(
+            CONNECTOR._probe_status(
+                AuthError("Foursquare verweigert den Zugriff (403): no")
+            ),
+            "403",
+        )
+        self.assertEqual(CONNECTOR._probe_status(RuntimeError("boom")), "ERR")
 
     def test_extras_abort_on_auth_error(self):
         self.api.fail["photos"] = AuthError("401")

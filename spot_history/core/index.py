@@ -63,6 +63,17 @@ CREATE TABLE sources (
     visits INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE source_profiles (
+    source TEXT PRIMARY KEY,
+    source_profile_id TEXT,
+    display_name TEXT,
+    home_city TEXT,
+    country_code TEXT,
+    photo_path TEXT,
+    counts_json TEXT,
+    updated_at TEXT
+);
+
 CREATE TABLE places (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -137,6 +148,38 @@ def build_index(
     try:
         conn.executescript(SCHEMA)
         for name, connector in sorted(connectors.items()):
+            iter_profile = getattr(connector, "iter_profile", None)
+            if callable(iter_profile):
+                try:
+                    profile = iter_profile()
+                except Exception as exc:
+                    log(f"Index: {name}: Profil übersprungen ({exc})")
+                    profile = None
+                if profile:
+                    conn.execute(
+                        "INSERT INTO source_profiles (source, source_profile_id, "
+                        "display_name, home_city, country_code, photo_path, "
+                        "counts_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(source) DO UPDATE SET "
+                        "source_profile_id=excluded.source_profile_id, "
+                        "display_name=excluded.display_name, "
+                        "home_city=excluded.home_city, "
+                        "country_code=excluded.country_code, "
+                        "photo_path=excluded.photo_path, "
+                        "counts_json=excluded.counts_json, "
+                        "updated_at=excluded.updated_at",
+                        (
+                            name,
+                            profile.get("source_profile_id"),
+                            profile.get("display_name"),
+                            profile.get("home_city"),
+                            profile.get("country_code"),
+                            profile.get("photo_path"),
+                            profile.get("counts_json")
+                            or json.dumps(profile.get("counts") or {}, ensure_ascii=False),
+                            profile.get("updated_at"),
+                        ),
+                    )
             visits = list(connector.iter_visits())
             if not visits:
                 log(f"Index: {name}: keine Daten, übersprungen")

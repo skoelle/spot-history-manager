@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import mimetypes
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -19,6 +20,9 @@ paths = build_paths(os.environ.get("SPOT_HISTORY_DATA_ROOT"))
 app = FastAPI(title="Spot History", version="0.1.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+
+MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MEDIA_DIRECTORIES = {"profile", "photos", "media"}
 
 
 def _range_label(stats: dict) -> str:
@@ -33,6 +37,12 @@ def _page_url(query: dict, page: int) -> str:
     params = {key: value for key, value in query.items() if value}
     params["page"] = page
     return "/?" + urlencode(params)
+
+
+def _venues_page_url(query: dict, page: int) -> str:
+    params = {key: value for key, value in query.items() if value}
+    params["page"] = page
+    return "/venues?" + urlencode(params)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -68,11 +78,17 @@ def index(
                 "city_value": city or "",
                 "range_label": "—",
                 "has_yelp": False,
+                "profile": None,
             },
         )
 
     conn = web_data.connect(index_db)
     try:
+        profiles = web_data.load_profiles(conn)
+        profile = next(
+            (item for item in profiles if item["source"] == "foursquare"),
+            profiles[0] if profiles else None,
+        )
         options = web_data.load_options(conn)
         city_value = web_data.resolve_city(city, options)
         filters = web_data.Filters(
@@ -122,8 +138,153 @@ def index(
             "city_value": city_value or "",
             "range_label": _range_label(stats),
             "has_yelp": any(option["value"] == "yelp" for option in options["sources"]),
+            "profile": profile,
         },
     )
+
+
+@app.get("/venues", response_class=HTMLResponse)
+def venues(
+    request: Request,
+    city: str | None = None,
+    category: str | None = None,
+    source: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+) -> HTMLResponse:
+    index_db = paths.index_db
+    if not index_db.exists():
+        return templates.TemplateResponse(
+            request,
+            "venues.html",
+            {
+                "request": request,
+                "index_missing": True,
+                "index_path": str(index_db),
+                "venues": [],
+                "options": {"cities": [], "categories": [], "sources": []},
+                "total": 0,
+                "page": 1,
+                "pages": 1,
+                "prev_url": None,
+                "next_url": None,
+                "query": {},
+                "profile": None,
+            },
+        )
+
+    conn = web_data.connect(index_db)
+    try:
+        profiles = web_data.load_profiles(conn)
+        profile = next(
+            (item for item in profiles if item["source"] == "foursquare"),
+            profiles[0] if profiles else None,
+        )
+        options = web_data.load_venue_options(conn)
+        filters = web_data.VenueFilters(
+            city=(city or "").strip() or None,
+            category=(category or "").strip() or None,
+            source=(source or "").strip() or None,
+            q=(q or "").strip() or None,
+        )
+        total = web_data.count_venues(conn, filters)
+        pages = max(1, (total + web_data.PAGE_SIZE - 1) // web_data.PAGE_SIZE)
+        page = min(max(1, page), pages)
+        venues = web_data.query_venues(
+            conn, filters, web_data.PAGE_SIZE, (page - 1) * web_data.PAGE_SIZE
+        )
+    finally:
+        conn.close()
+
+    query = {
+        "city": city or "",
+        "category": category or "",
+        "source": source or "",
+        "q": q or "",
+    }
+    return templates.TemplateResponse(
+        request,
+        "venues.html",
+        {
+            "request": request,
+            "index_missing": False,
+            "index_path": str(index_db),
+            "venues": venues,
+            "options": options,
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "prev_url": _venues_page_url(query, page - 1) if page > 1 else None,
+            "next_url": _venues_page_url(query, page + 1) if page < pages else None,
+            "query": query,
+            "profile": profile,
+        },
+    )
+
+
+@app.get("/venues/{place_id}", response_class=HTMLResponse)
+def venue_detail(
+    request: Request, place_id: int, page: int = 1
+) -> HTMLResponse:
+    index_db = paths.index_db
+    if not index_db.exists():
+        raise HTTPException(status_code=503, detail="Index missing")
+    conn = web_data.connect(index_db)
+    try:
+        profiles = web_data.load_profiles(conn)
+        profile = next(
+            (item for item in profiles if item["source"] == "foursquare"),
+            profiles[0] if profiles else None,
+        )
+        venue = web_data.get_venue(conn, place_id)
+        if not venue:
+            raise HTTPException(status_code=404, detail="Venue not found")
+        filters = web_data.Filters(place_id=place_id)
+        total = web_data.count_visits(conn, filters)
+        pages = max(1, (total + web_data.PAGE_SIZE - 1) // web_data.PAGE_SIZE)
+        page = min(max(1, page), pages)
+        visits = web_data.query_visits(
+            conn, filters, web_data.PAGE_SIZE, (page - 1) * web_data.PAGE_SIZE
+        )
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "venue.html",
+        {
+            "request": request,
+            "venue": venue,
+            "visits": visits,
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "prev_url": (
+                f"/venues/{place_id}?page={page - 1}" if page > 1 else None
+            ),
+            "next_url": (
+                f"/venues/{place_id}?page={page + 1}" if page < pages else None
+            ),
+            "profile": profile,
+        },
+    )
+
+
+@app.get("/media/{path:path}")
+def media(path: str) -> FileResponse:
+    data_root = paths.data_root.resolve()
+    candidate = (paths.root / path).resolve()
+    if not candidate.is_relative_to(data_root):
+        raise HTTPException(status_code=404)
+    relative = candidate.relative_to(data_root)
+    if (
+        len(relative.parts) < 3
+        or relative.parts[1] not in MEDIA_DIRECTORIES
+        or candidate.suffix.lower() not in MEDIA_EXTENSIONS
+        or not candidate.is_file()
+    ):
+        raise HTTPException(status_code=404)
+    media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+    return FileResponse(candidate, media_type=media_type)
 
 
 @app.get("/health")
