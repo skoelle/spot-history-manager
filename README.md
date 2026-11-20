@@ -119,7 +119,10 @@ lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
   Neues und schreibt Exporte neu
 - Zusätzlich importiert: `venuehistory` (1029 von 1051 API-Venues), `lists`
   (5 Listen, 150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
-  (11) und alle Nutzerfotos (577; 562 mit Check-in, 15 standalone)
+  (11, inkl. Details wie Sprache, Saves, Titel) und alle Nutzerfotos
+  (577; 562 mit Check-in, 15 standalone)
+- Tastes (`/v2/users/self/tastes`, 17 Einträge) und die Tip-Details
+  (`/v2/tips/<id>`) werden vollständig inklusive Roh-JSON gespeichert
 - Nutzerprofil inklusive Zählern und lokal gespeichertem Avatar
   (`data/foursquare/profile/`)
 - Bekannte API-Lücken werden in `sync_diagnostics` dokumentiert und in `stats`

@@ -164,3 +164,18 @@ class FoursquareAPI:
         response = self._request("users/self/tips", params)
         block = response.get("tips") or {}
         return block.get("items") or [], block.get("count")
+
+    def tip_details(self, tip_id: str) -> dict[str, Any]:
+        response = self._request(f"tips/{tip_id}", {})
+        return response.get("tip") or {}
+
+    def tastes(self) -> list[dict[str, Any]]:
+        response = self._request("users/self/tastes", {})
+        block = response.get("tastes") or {}
+        items = block.get("items")
+        if items is not None:
+            return items
+        collected: list[dict[str, Any]] = []
+        for group in block.get("groups") or []:
+            collected.extend(group.get("items") or [])
+        return collected

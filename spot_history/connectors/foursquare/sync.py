@@ -193,6 +193,8 @@ class Sync:
             ("Venue-History", self.sync_venue_history),
             ("Listen", self.sync_lists),
             ("Tipps", self.sync_tips),
+            ("Tip-Details", self.sync_tip_details),
+            ("Tastes", self.sync_tastes),
         ):
             try:
                 func()
@@ -365,6 +367,35 @@ class Sync:
                 self.log(f"Tipps: {len(seen)} eindeutig, API meldet {api_total}")
         return len(seen)
 
+    def sync_tip_details(self) -> int:
+        rows = self.db.tip_rows()
+        if not rows:
+            return 0
+        updated = 0
+        total = len(rows)
+        for index, row in enumerate(rows, 1):
+            try:
+                tip = self.api.tip_details(row["id"])
+            except AuthError:
+                raise
+            except Exception as exc:
+                self.log(f"Tipp {row['id']}: Details übersprungen ({exc})")
+                continue
+            if tip and self.db.upsert_tip_details(tip):
+                updated += 1
+            if index % 10 == 0 or index == total:
+                self.log(f"Tip-Details: {index}/{total} verarbeitet")
+            time.sleep(self.cfg.sleep)
+        self.log(f"Tip-Details: {updated}/{total} angereichert")
+        return updated
+
+    def sync_tastes(self) -> int:
+        items = self.api.tastes()
+        stored = self.db.upsert_tastes(items)
+        self.db.set_state("tastes_total", stored)
+        self.log(f"Tastes: {stored} gespeichert")
+        return stored
+
     def write_diagnostics(self) -> None:
         stats = self.db.stats()
         checkin_total = self.db.get_int_state("api_total")
@@ -405,6 +436,11 @@ class Sync:
             "tips",
             self.db.get_int_state("tips_total") or None,
             stats["tips"],
+        )
+        self.db.set_diagnostic(
+            "tastes",
+            self.db.get_int_state("tastes_total") or None,
+            stats["tastes"],
         )
         self.db.set_diagnostic(
             "venue_details", None, None, "blocked: 402/429, keine Credits"

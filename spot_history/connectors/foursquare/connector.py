@@ -111,6 +111,8 @@ class FoursquareConnector(BaseConnector):
             "users/self/venuehistory",
             "users/self/lists",
             "users/self/tips",
+            "users/self/tastes",
+            "users/self/activities",
             "users/self/mayorships",
             "users/self/todos",
             "users/self/friends",
@@ -158,6 +160,7 @@ class FoursquareConnector(BaseConnector):
         print(f"Venue-History:    {stats['venue_history']}")
         print(f"Listen:           {stats['lists']} ({stats['list_items']} Einträge)")
         print(f"Tipps:            {stats['tips']}")
+        print(f"Tastes:           {stats['tastes']}")
         if stats["profile_name"]:
             print(f"Profil:           {stats['profile_name']}")
         print(f"Letzter Sync:     {stats['last_sync_at'] or '-'}")

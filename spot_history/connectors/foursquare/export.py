@@ -41,7 +41,10 @@ LIST_ITEM_FIELDS = ["list_id", "venue_id", "venue_name", "note"]
 
 TIP_FIELDS = [
     "id", "created_at", "created_at_utc", "venue_id", "venue_name", "text",
+    "canonical_url", "lang", "saves_count", "title",
 ]
+
+TASTE_FIELDS = ["id", "text", "on_user", "updated_at"]
 
 PROFILE_FIELDS = [
     "id", "display_name", "first_name", "last_name", "handle", "home_city",
@@ -185,12 +188,21 @@ def export_all(db: Database, cfg: FoursquareConfig, log=print) -> dict[str, Path
             row["id"], row["created_at"],
             iso_utc(row["created_at"]) if row["created_at"] else None,
             row["venue_id"], row["venue_name"], row["text"],
+            row["canonical_url"], row["lang"], row["saves_count"], row["title"],
         ]
         for row in db.tip_rows()
     ]
     path = data_dir / "tips.csv"
     _write_csv(path, TIP_FIELDS, rows)
     paths["tips_csv"] = path
+
+    rows = [
+        [row["id"], row["text"], row["on_user"], row["updated_at"]]
+        for row in db.taste_rows()
+    ]
+    path = data_dir / "tastes.csv"
+    _write_csv(path, TASTE_FIELDS, rows)
+    paths["tastes_csv"] = path
 
     profile = db.user_profile()
     rows = []
@@ -225,6 +237,7 @@ def export_all(db: Database, cfg: FoursquareConfig, log=print) -> dict[str, Path
 
     log(
         f"Export: {len(raw)} Check-ins, {len(like_rows)} Likes, "
-        f"{len(db.tip_rows())} Tipps, {len(rows)} Venues -> {data_dir}"
+        f"{len(db.tip_rows())} Tipps, {len(db.taste_rows())} Tastes, "
+        f"{len(rows)} Venues -> {data_dir}"
     )
     return paths

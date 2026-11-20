@@ -187,10 +187,22 @@ CREATE TABLE IF NOT EXISTS tips (
     text TEXT,
     venue_id TEXT,
     venue_name TEXT,
+    canonical_url TEXT,
+    lang TEXT,
+    saves_count INTEGER NOT NULL DEFAULT 0,
+    title TEXT,
     raw_json TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_tips_created_at ON tips(created_at);
+
+CREATE TABLE IF NOT EXISTS tastes (
+    id TEXT PRIMARY KEY,
+    text TEXT,
+    on_user INTEGER NOT NULL DEFAULT 0,
+    raw_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS user_profile (
     id TEXT PRIMARY KEY,
@@ -319,14 +331,28 @@ ON CONFLICT(list_id, venue_id) DO UPDATE SET
     raw_json=excluded.raw_json
 """
 
-TIP_SQL = """
-INSERT INTO tips (
-    id, created_at, text, venue_id, venue_name, raw_json
-) VALUES (?, ?, ?, ?, ?, ?)
+TIP_COLUMNS = [
+    "id", "created_at", "text", "venue_id", "venue_name", "canonical_url",
+    "lang", "saves_count", "title", "raw_json",
+]
+
+TIP_SQL = (
+    f"INSERT INTO tips ({', '.join(TIP_COLUMNS)}) "
+    f"VALUES ({', '.join('?' for _ in TIP_COLUMNS)}) "
+    "ON CONFLICT(id) DO UPDATE SET "
+    + ", ".join(
+        f"{column}=excluded.{column}"
+        for column in TIP_COLUMNS
+        if column != "id"
+    )
+)
+
+TASTE_SQL = """
+INSERT INTO tastes (id, text, on_user, raw_json, updated_at)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-    created_at=excluded.created_at, text=excluded.text,
-    venue_id=excluded.venue_id, venue_name=excluded.venue_name,
-    raw_json=excluded.raw_json
+    text=excluded.text, on_user=excluded.on_user,
+    raw_json=excluded.raw_json, updated_at=excluded.updated_at
 """
 
 PROFILE_COLUMNS = [
@@ -403,8 +429,29 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
         return self
+
+    def _migrate(self) -> None:
+        additions = {
+            "tips": {
+                "canonical_url": "TEXT",
+                "lang": "TEXT",
+                "saves_count": "INTEGER NOT NULL DEFAULT 0",
+                "title": "TEXT",
+            }
+        }
+        for table, columns in additions.items():
+            existing = {
+                row[1]
+                for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for name, declaration in columns.items():
+                if name not in existing:
+                    self.conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                    )
 
     def close(self) -> None:
         if self.conn is not None:
@@ -770,25 +817,76 @@ class Database:
                 count += 1
         return count
 
+    def _upsert_tip_row(self, tip: dict[str, Any]) -> bool:
+        tip_id = tip.get("id")
+        if not tip_id:
+            return False
+        venue = tip.get("venue") or {}
+        saves = tip.get("saves") or {}
+        self.conn.execute(
+            TIP_SQL,
+            (
+                tip_id,
+                tip.get("createdAt"),
+                tip.get("text"),
+                venue.get("id"),
+                venue.get("name"),
+                tip.get("canonicalUrl"),
+                tip.get("lang"),
+                int(saves.get("count") or 0),
+                tip.get("title"),
+                json.dumps(tip, ensure_ascii=False, separators=(",", ":")),
+            ),
+        )
+        return True
+
     def upsert_tips(self, items: list[dict[str, Any]]) -> int:
         if not items:
             return 0
         count = 0
         with self.conn:
             for tip in items:
-                tip_id = tip.get("id")
-                if not tip_id:
+                if self._upsert_tip_row(tip):
+                    count += 1
+        return count
+
+    def upsert_tip_details(self, tip: dict[str, Any]) -> bool:
+        tip_id = tip.get("id")
+        if not tip_id:
+            return False
+        existing = self.conn.execute(
+            "SELECT raw_json FROM tips WHERE id=?", (tip_id,)
+        ).fetchone()
+        merged = dict(tip)
+        if existing and existing["raw_json"]:
+            try:
+                base = json.loads(existing["raw_json"])
+            except (ValueError, TypeError):
+                base = {}
+            base.update(tip)
+            merged = base
+        with self.conn:
+            self._upsert_tip_row(merged)
+        return True
+
+    def upsert_tastes(self, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        now = iso_now()
+        count = 0
+        with self.conn:
+            for item in items:
+                taste_id = item.get("id")
+                if not taste_id:
                     continue
-                venue = tip.get("venue") or {}
                 self.conn.execute(
-                    TIP_SQL,
+                    TASTE_SQL,
                     (
-                        tip_id,
-                        tip.get("createdAt"),
-                        tip.get("text"),
-                        venue.get("id"),
-                        venue.get("name"),
-                        json.dumps(tip, ensure_ascii=False, separators=(",", ":")),
+                        taste_id,
+                        item.get("text"),
+                        1 if item.get("onUser") else 0,
+                        json.dumps(item, ensure_ascii=False, separators=(",", ":")),
+                        now,
                     ),
                 )
                 count += 1
@@ -951,6 +1049,11 @@ class Database:
             "SELECT * FROM tips ORDER BY created_at"
         ).fetchall()
 
+    def taste_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM tastes ORDER BY text"
+        ).fetchall()
+
     def venue_rows(self) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM venues ORDER BY name"
@@ -972,6 +1075,7 @@ class Database:
         lists = conn.execute("SELECT COUNT(*) AS v FROM lists").fetchone()["v"]
         list_items = conn.execute("SELECT COUNT(*) AS v FROM list_items").fetchone()["v"]
         tips = conn.execute("SELECT COUNT(*) AS v FROM tips").fetchone()["v"]
+        tastes = conn.execute("SELECT COUNT(*) AS v FROM tastes").fetchone()["v"]
         standalone_photos = conn.execute(
             "SELECT COUNT(*) AS v FROM photos WHERE checkin_id IS NULL"
         ).fetchone()["v"]
@@ -1001,6 +1105,7 @@ class Database:
             "lists": lists,
             "list_items": list_items,
             "tips": tips,
+            "tastes": tastes,
             "standalone_photos": standalone_photos,
             "top_categories": top_categories,
             "top_cities": top_cities,

@@ -57,6 +57,9 @@ class FakeAPI:
         self.tip_pages: dict[int, list[dict]] = {}
         self.tip_total: int | None = None
         self.tip_offsets: list[int] = []
+        self.tip_detail_payload: dict[str, dict] = {}
+        self.tip_detail_calls: list[str] = []
+        self.taste_payload: list[dict] = []
         self.fail: dict[str, Exception] = {}
         self.profile: dict = {
             "id": "185614",
@@ -124,6 +127,17 @@ class FakeAPI:
             raise self.fail["tips"]
         self.tip_offsets.append(offset)
         return self.tip_pages.get(offset, []), self.tip_total
+
+    def tip_details(self, tip_id):
+        if "tip_details" in self.fail:
+            raise self.fail["tip_details"]
+        self.tip_detail_calls.append(tip_id)
+        return self.tip_detail_payload.get(tip_id, {})
+
+    def tastes(self):
+        if "tastes" in self.fail:
+            raise self.fail["tastes"]
+        return self.taste_payload
 
 
 class ExtrasTest(unittest.TestCase):
@@ -287,6 +301,54 @@ class ExtrasTest(unittest.TestCase):
         self.assertEqual(self.sync.sync_tips(), 3)
         self.assertEqual(self.db.stats()["tips"], 3)
         self.assertEqual(self.api.tip_offsets, [0, 2, 3])
+
+    def test_tip_details_merge_keeps_list_fields(self):
+        self.api.tip_pages = {
+            0: [
+                {
+                    "id": "t1",
+                    "createdAt": 100,
+                    "text": "hi",
+                    "canonicalUrl": "https://example.invalid/tip/t1",
+                    "todo": {"count": 2},
+                    "venue": {"id": "v1", "name": "A"},
+                }
+            ],
+            1: [],
+        }
+        self.sync.sync_tips()
+        self.api.tip_detail_payload["t1"] = {
+            "id": "t1",
+            "createdAt": 100,
+            "text": "hi",
+            "lang": "de",
+            "title": "Stefan's tip",
+            "saves": {"count": 3},
+            "venue": {"id": "v1", "name": "A"},
+        }
+
+        self.assertEqual(self.sync.sync_tip_details(), 1)
+        row = self.db.tip_rows()[0]
+        self.assertEqual(row["lang"], "de")
+        self.assertEqual(row["saves_count"], 3)
+        self.assertEqual(row["title"], "Stefan's tip")
+        self.assertEqual(row["canonical_url"], "https://example.invalid/tip/t1")
+        self.assertIn('"todo"', row["raw_json"])
+        self.assertIn('"saves"', row["raw_json"])
+
+    def test_tastes_are_persisted(self):
+        self.api.taste_payload = [
+            {"id": "ta1", "text": "Espresso", "onUser": True},
+            {"id": "ta2", "text": "Wanderwege", "onUser": True},
+        ]
+
+        self.assertEqual(self.sync.sync_tastes(), 2)
+        stats = self.db.stats()
+        self.assertEqual(stats["tastes"], 2)
+        rows = {row["id"]: row for row in self.db.taste_rows()}
+        self.assertEqual(rows["ta1"]["text"], "Espresso")
+        self.assertEqual(rows["ta2"]["on_user"], 1)
+        self.assertEqual(self.db.get_int_state("tastes_total"), 2)
 
     def test_profile_is_persisted_without_photo_download(self):
         self.sync.sync_profile()
