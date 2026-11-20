@@ -93,15 +93,17 @@ lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
 ## Foursquare-Details
 
 - Check-ins: 2339 laut API, 2338 eindeutig (1 gelöscht/privat)
-- 1036 Venues, 558 Fotos, 115 Kommentare, 294 Likes
+- 1036 Venues, 577 Fotos (562 mit Check-in verknüpft, 15 standalone),
+  115 Kommentare, 294 Likes
 - Zeitraum 2010-01-28 bis 2026-09-01
 - Paginierung über `beforeTimestamp` (Offset-Paging wird von Foursquare nach
   wenigen hundert Einträgen gekappt und wiederholt dann die erste Seite)
 - Kommentartexte werden über `/v2/checkins/<id>/comments` nachgeladen
 - Der Sync-Stand (`last_max_created_at`) liegt in `sync_state`; `sync` holt nur
   Neues und schreibt Exporte neu
-- Zusätzlich vorhanden, noch nicht importiert: `venuehistory` (1051 Venues),
-  `lists` (5), `tips` (11), alle Nutzerfotos (577 statt 558)
+- Zusätzlich importiert: `venuehistory` (1029 von 1051 API-Venues), `lists`
+  (5 Listen, ~150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
+  (11) und alle Nutzerfotos (577; 562 mit Check-in, 15 standalone)
 
 ## Weitere Quellen
 

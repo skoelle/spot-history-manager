@@ -4,7 +4,7 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-from ..base import BaseConnector
+from ..base import BaseConnector, Visit
 from ...core.config import ROOT
 
 SOURCE = "foursquare"
@@ -96,8 +96,13 @@ class FoursquareConnector(BaseConnector):
             print(f"Zeitraum:         {iso_utc(stats['oldest'])} .. {iso_utc(stats['newest'])}")
         print(f"Venues:           {stats['venues']}")
         print(f"Fotos:            {stats['photos_downloaded']}/{stats['photos_total']} geladen")
+        if stats["standalone_photos"]:
+            print(f"Standalone-Fotos: {stats['standalone_photos']}")
         print(f"Kommentare:       {stats['comments']}")
         print(f"Likes:            {stats['likes']}")
+        print(f"Venue-History:    {stats['venue_history']}")
+        print(f"Listen:           {stats['lists']} ({stats['list_items']} Einträge)")
+        print(f"Tipps:            {stats['tips']}")
         print(f"Letzter Sync:     {stats['last_sync_at'] or '-'}")
         if stats["last_max_created_at"]:
             print(f"Daten bis:        {iso_utc(stats['last_max_created_at'])}")

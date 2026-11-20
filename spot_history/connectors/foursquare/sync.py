@@ -4,13 +4,18 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from .api import FoursquareAPI
+from .api import AuthError, FoursquareAPI
 from .config import FoursquareConfig
 from .db import Database, iso_now, iso_utc
 from .export import export_all
 from .photos import download_pending
 
 MAX_PAGES = 200
+PHOTO_PAGE_LIMIT = 500
+VENUE_HISTORY_PAGE_LIMIT = 500
+LIST_PAGE_LIMIT = 50
+LIST_DETAIL_LIMIT = 100
+TIP_PAGE_LIMIT = 50
 
 
 def _default_log(message: str) -> None:
@@ -173,11 +178,178 @@ class Sync:
             self._export()
 
     def _post_processing(self) -> tuple[int, int]:
+        self.sync_extras()
         comments = self.fetch_comments()
         photos = 0
         if self.cfg.download_photos:
             photos = download_pending(self.db, self.cfg, log=self.log)
         return comments, photos
+
+    def sync_extras(self) -> None:
+        for name, func in (
+            ("Fotos", self.sync_all_photos),
+            ("Venue-History", self.sync_venue_history),
+            ("Listen", self.sync_lists),
+            ("Tipps", self.sync_tips),
+        ):
+            try:
+                func()
+            except AuthError:
+                raise
+            except Exception as exc:
+                self.log(f"{name}: übersprungen ({exc})")
+
+    def sync_all_photos(self) -> int:
+        seen: set[str] = set()
+        offset = 0
+        api_total: int | None = None
+        for _ in range(MAX_PAGES):
+            items, count = self.api.photos(limit=PHOTO_PAGE_LIMIT, offset=offset)
+            if api_total is None and count is not None:
+                api_total = int(count)
+            if not items:
+                break
+            new_items = [
+                item
+                for item in items
+                if item.get("id") and item["id"] not in seen
+            ]
+            if not new_items:
+                self.log("Fotos: keine neuen IDs mehr, stoppe")
+                break
+            seen.update(item["id"] for item in new_items)
+            inserted = self.db.upsert_photos(new_items)
+            self.log(
+                f"Fotos: {len(seen)} eindeutig, {inserted} neu "
+                f"(offset {offset}, {len(items)} Einträge)"
+            )
+            offset += len(items)
+            time.sleep(self.cfg.sleep)
+        if api_total is not None:
+            self.db.set_state("photos_api_total", api_total)
+            if api_total != len(seen):
+                self.log(f"Fotos: {len(seen)} eindeutig, API meldet {api_total}")
+        return len(seen)
+
+    def sync_venue_history(self) -> int:
+        seen: set[str] = set()
+        offset = 0
+        api_total: int | None = None
+        for _ in range(MAX_PAGES):
+            items, count = self.api.venue_history(
+                limit=VENUE_HISTORY_PAGE_LIMIT, offset=offset
+            )
+            if api_total is None and count is not None:
+                api_total = int(count)
+            if not items:
+                break
+            new_items = [
+                item
+                for item in items
+                if (item.get("venue") or {}).get("id")
+                and (item.get("venue") or {})["id"] not in seen
+            ]
+            if not new_items:
+                self.log("Venue-History: keine neuen Venues mehr, stoppe")
+                break
+            for item in new_items:
+                seen.add(item["venue"]["id"])
+            stored = self.db.upsert_venue_history(new_items)
+            self.log(f"Venue-History: {stored} Einträge (offset {offset})")
+            offset += len(items)
+            time.sleep(self.cfg.sleep)
+        if api_total is not None:
+            self.db.set_state("venue_history_total", api_total)
+            if api_total != len(seen):
+                self.log(
+                    f"Venue-History: {len(seen)} eindeutig, API meldet {api_total}"
+                )
+        return len(seen)
+
+    def sync_lists(self) -> int:
+        items = self.api.lists(limit=LIST_PAGE_LIMIT)
+        stored = self.db.upsert_lists(items)
+        self.log(f"Listen: {stored} gespeichert")
+        for raw in items:
+            item = raw.get("list") if isinstance(raw.get("list"), dict) else raw
+            list_id = item.get("id")
+            if not list_id:
+                continue
+            expected = int((item.get("listItems") or {}).get("count") or 0)
+            seen: set[str] = set()
+            offset = 0
+            last_details: dict[str, Any] = {}
+            for _ in range(MAX_PAGES):
+                try:
+                    details = self.api.list_details(
+                        list_id, limit=LIST_DETAIL_LIMIT, offset=offset
+                    )
+                except AuthError:
+                    raise
+                except Exception as exc:
+                    self.log(f"Liste {list_id}: Details übersprungen ({exc})")
+                    break
+                if not details:
+                    break
+                last_details = details
+                block = details.get("listItems") or {}
+                if block.get("count") is not None:
+                    expected = int(block.get("count") or expected)
+                list_items = block.get("items") or []
+                if not list_items:
+                    break
+                new_items: list[dict[str, Any]] = []
+                for entry in list_items:
+                    venue = entry.get("venue") or {}
+                    key = venue.get("id") or entry.get("venueId") or entry.get("id")
+                    if not key or str(key) in seen:
+                        continue
+                    seen.add(str(key))
+                    new_items.append(entry)
+                if not new_items:
+                    self.log(f"Liste {list_id}: keine neuen Einträge mehr, stoppe")
+                    break
+                self.db.upsert_list_items(list_id, new_items)
+                offset += len(list_items)
+                time.sleep(self.cfg.sleep)
+            if last_details:
+                self.db.upsert_lists([last_details])
+            stored_items = len(seen)
+            if expected and stored_items < expected:
+                self.log(
+                    f"Liste {list_id}: {stored_items} von {expected}, "
+                    f"{expected - stored_items} API-seitig nicht geliefert"
+                )
+            else:
+                self.log(f"Liste {list_id}: {stored_items} Einträge")
+        return stored
+
+    def sync_tips(self) -> int:
+        seen: set[str] = set()
+        offset = 0
+        api_total: int | None = None
+        for _ in range(MAX_PAGES):
+            items, count = self.api.tips(limit=TIP_PAGE_LIMIT, offset=offset)
+            if api_total is None and count is not None:
+                api_total = int(count)
+            if not items:
+                break
+            new_items = [
+                item for item in items if item.get("id") and item["id"] not in seen
+            ]
+            if not new_items:
+                self.log("Tipps: keine neuen IDs mehr, stoppe")
+                break
+            seen.update(item["id"] for item in new_items)
+            stored = self.db.upsert_tips(new_items)
+            self.log(f"Tipps: {len(seen)} eindeutig, {stored} verarbeitet")
+            offset += len(items)
+            time.sleep(self.cfg.sleep)
+        if api_total is not None:
+            self.db.set_state("tips_total", api_total)
+            if api_total != len(seen):
+                self.log(f"Tipps: {len(seen)} eindeutig, API meldet {api_total}")
+        return len(seen)
 
     def fetch_comments(self) -> int:
         pending = self.db.pending_comment_checkins()

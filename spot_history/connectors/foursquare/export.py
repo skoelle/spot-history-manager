@@ -33,6 +33,16 @@ LIKE_FIELDS = [
     "country_code", "is_service_user",
 ]
 
+VENUE_HISTORY_FIELDS = ["venue_id", "been_here", "updated_at"]
+
+LIST_FIELDS = ["id", "name", "type", "visibility", "count", "updated_at"]
+
+LIST_ITEM_FIELDS = ["list_id", "venue_id", "venue_name", "note"]
+
+TIP_FIELDS = [
+    "id", "created_at", "created_at_utc", "venue_id", "venue_name", "text",
+]
+
 
 def _write_json(path: Path, payload) -> None:
     tmp = path.with_name(path.name + ".tmp")
@@ -129,5 +139,47 @@ def export_all(db: Database, cfg: FoursquareConfig, log=print) -> dict[str, Path
     _write_csv(path, LIKE_FIELDS, rows)
     paths["likes_csv"] = path
 
-    log(f"Export: {len(raw)} Check-ins, {len(rows)} Likes -> {data_dir}")
+    rows = [
+        [row["venue_id"], row["been_here"], row["updated_at"]]
+        for row in db.venue_history_rows()
+    ]
+    path = data_dir / "venue_history.csv"
+    _write_csv(path, VENUE_HISTORY_FIELDS, rows)
+    paths["venue_history_csv"] = path
+
+    rows = [
+        [
+            row["id"], row["name"], row["type"], row["visibility"],
+            row["count"], row["updated_at"],
+        ]
+        for row in db.list_rows()
+    ]
+    path = data_dir / "lists.csv"
+    _write_csv(path, LIST_FIELDS, rows)
+    paths["lists_csv"] = path
+
+    rows = [
+        [row["list_id"], row["venue_id"], row["venue_name"], row["note"]]
+        for row in db.list_item_rows()
+    ]
+    path = data_dir / "list_items.csv"
+    _write_csv(path, LIST_ITEM_FIELDS, rows)
+    paths["list_items_csv"] = path
+
+    rows = [
+        [
+            row["id"], row["created_at"],
+            iso_utc(row["created_at"]) if row["created_at"] else None,
+            row["venue_id"], row["venue_name"], row["text"],
+        ]
+        for row in db.tip_rows()
+    ]
+    path = data_dir / "tips.csv"
+    _write_csv(path, TIP_FIELDS, rows)
+    paths["tips_csv"] = path
+
+    log(
+        f"Export: {len(raw)} Check-ins, {len(like_rows)} Likes, "
+        f"{len(rows)} Tipps -> {data_dir}"
+    )
     return paths

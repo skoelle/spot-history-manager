@@ -152,6 +152,45 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     api_total INTEGER,
     error TEXT
 );
+
+CREATE TABLE IF NOT EXISTS venue_history (
+    venue_id TEXT PRIMARY KEY,
+    been_here INTEGER NOT NULL DEFAULT 0,
+    raw_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS lists (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    type TEXT,
+    visibility TEXT,
+    count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS list_items (
+    list_id TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    venue_id TEXT NOT NULL,
+    venue_name TEXT,
+    note TEXT,
+    raw_json TEXT NOT NULL,
+    PRIMARY KEY (list_id, venue_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_list_items_list ON list_items(list_id);
+
+CREATE TABLE IF NOT EXISTS tips (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    text TEXT,
+    venue_id TEXT,
+    venue_name TEXT,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tips_created_at ON tips(created_at);
 """
 
 CHECKIN_COLUMNS = [
@@ -216,6 +255,41 @@ ON CONFLICT(id) DO UPDATE SET
     checkin_id=excluded.checkin_id, created_at=excluded.created_at,
     user_id=excluded.user_id, user_display_name=excluded.user_display_name,
     text=excluded.text, raw_json=excluded.raw_json
+"""
+
+VENUE_HISTORY_SQL = """
+INSERT INTO venue_history (venue_id, been_here, raw_json, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(venue_id) DO UPDATE SET
+    been_here=excluded.been_here, raw_json=excluded.raw_json,
+    updated_at=excluded.updated_at
+"""
+
+LIST_SQL = """
+INSERT INTO lists (id, name, type, visibility, count, updated_at, raw_json)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    name=excluded.name, type=excluded.type, visibility=excluded.visibility,
+    count=excluded.count, updated_at=excluded.updated_at,
+    raw_json=excluded.raw_json
+"""
+
+LIST_ITEM_SQL = """
+INSERT INTO list_items (list_id, venue_id, venue_name, note, raw_json)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(list_id, venue_id) DO UPDATE SET
+    venue_name=excluded.venue_name, note=excluded.note,
+    raw_json=excluded.raw_json
+"""
+
+TIP_SQL = """
+INSERT INTO tips (
+    id, created_at, text, venue_id, venue_name, raw_json
+) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    created_at=excluded.created_at, text=excluded.text,
+    venue_id=excluded.venue_id, venue_name=excluded.venue_name,
+    raw_json=excluded.raw_json
 """
 
 
@@ -505,6 +579,146 @@ class Database:
                 )
         return len(items)
 
+    def upsert_photos(self, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        inserted = 0
+        with self.conn:
+            for photo in items:
+                photo_id = photo.get("id")
+                if not photo_id:
+                    continue
+                checkin = photo.get("checkin") or {}
+                checkin_id = checkin.get("id")
+                if checkin_id and not self.conn.execute(
+                    "SELECT 1 FROM checkins WHERE id=?", (checkin_id,)
+                ).fetchone():
+                    checkin_id = None
+                existing = self.conn.execute(
+                    "SELECT checkin_id FROM photos WHERE id=?", (photo_id,)
+                ).fetchone()
+                if existing is None:
+                    inserted += 1
+                elif checkin_id is None:
+                    checkin_id = existing["checkin_id"]
+                user = photo.get("user") or {}
+                self.conn.execute(
+                    PHOTO_SQL,
+                    (
+                        photo_id,
+                        checkin_id,
+                        photo.get("createdAt"),
+                        photo.get("width"),
+                        photo.get("height"),
+                        photo.get("prefix"),
+                        photo.get("suffix"),
+                        photo_url(photo),
+                        photo.get("canonicalUrl"),
+                        photo.get("visibility"),
+                        user.get("id"),
+                        user.get("displayName"),
+                        json.dumps(photo, ensure_ascii=False, separators=(",", ":")),
+                    ),
+                )
+        return inserted
+
+    def upsert_venue_history(self, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        now = iso_now()
+        count = 0
+        with self.conn:
+            for item in items:
+                venue = item.get("venue") or {}
+                venue_id = venue.get("id") or item.get("venueId")
+                if not venue_id:
+                    continue
+                self.conn.execute(
+                    VENUE_HISTORY_SQL,
+                    (
+                        venue_id,
+                        int(item.get("beenHere") or 0),
+                        json.dumps(item, ensure_ascii=False, separators=(",", ":")),
+                        now,
+                    ),
+                )
+                count += 1
+        return count
+
+    def upsert_lists(self, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        now = iso_now()
+        count = 0
+        with self.conn:
+            for raw in items:
+                item = raw.get("list") if isinstance(raw.get("list"), dict) else raw
+                list_id = item.get("id")
+                if not list_id:
+                    continue
+                list_items = item.get("listItems") or {}
+                self.conn.execute(
+                    LIST_SQL,
+                    (
+                        list_id,
+                        item.get("name"),
+                        item.get("type"),
+                        item.get("visibility"),
+                        int(list_items.get("count") or item.get("count") or 0),
+                        now,
+                        json.dumps(item, ensure_ascii=False, separators=(",", ":")),
+                    ),
+                )
+                count += 1
+        return count
+
+    def upsert_list_items(self, list_id: str, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        count = 0
+        with self.conn:
+            for item in items:
+                venue = item.get("venue") or {}
+                venue_id = venue.get("id") or item.get("venueId") or item.get("id")
+                if not venue_id:
+                    continue
+                self.conn.execute(
+                    LIST_ITEM_SQL,
+                    (
+                        list_id,
+                        str(venue_id),
+                        venue.get("name") or item.get("venueName"),
+                        item.get("note") or item.get("text"),
+                        json.dumps(item, ensure_ascii=False, separators=(",", ":")),
+                    ),
+                )
+                count += 1
+        return count
+
+    def upsert_tips(self, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        count = 0
+        with self.conn:
+            for tip in items:
+                tip_id = tip.get("id")
+                if not tip_id:
+                    continue
+                venue = tip.get("venue") or {}
+                self.conn.execute(
+                    TIP_SQL,
+                    (
+                        tip_id,
+                        tip.get("createdAt"),
+                        tip.get("text"),
+                        venue.get("id"),
+                        venue.get("name"),
+                        json.dumps(tip, ensure_ascii=False, separators=(",", ":")),
+                    ),
+                )
+                count += 1
+        return count
+
     def pending_photos(self) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM photos WHERE downloaded_path IS NULL OR downloaded_path='' "
@@ -578,6 +792,26 @@ class Database:
             "SELECT * FROM checkin_comments ORDER BY created_at"
         ).fetchall()
 
+    def venue_history_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM venue_history ORDER BY venue_id"
+        ).fetchall()
+
+    def list_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM lists ORDER BY name"
+        ).fetchall()
+
+    def list_item_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM list_items ORDER BY list_id, venue_name"
+        ).fetchall()
+
+    def tip_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM tips ORDER BY created_at"
+        ).fetchall()
+
     def stats(self) -> dict[str, Any]:
         conn = self.conn
         total = conn.execute("SELECT COUNT(*) AS v FROM checkins").fetchone()["v"]
@@ -588,6 +822,15 @@ class Database:
         comments = conn.execute("SELECT COUNT(*) AS v FROM checkin_comments").fetchone()["v"]
         likes = conn.execute("SELECT COUNT(*) AS v FROM likes").fetchone()["v"]
         venues = conn.execute("SELECT COUNT(*) AS v FROM venues").fetchone()["v"]
+        venue_history = conn.execute(
+            "SELECT COUNT(*) AS v FROM venue_history"
+        ).fetchone()["v"]
+        lists = conn.execute("SELECT COUNT(*) AS v FROM lists").fetchone()["v"]
+        list_items = conn.execute("SELECT COUNT(*) AS v FROM list_items").fetchone()["v"]
+        tips = conn.execute("SELECT COUNT(*) AS v FROM tips").fetchone()["v"]
+        standalone_photos = conn.execute(
+            "SELECT COUNT(*) AS v FROM photos WHERE checkin_id IS NULL"
+        ).fetchone()["v"]
         top_categories = conn.execute(
             "SELECT category_name AS name, COUNT(*) AS n FROM checkins "
             "WHERE category_name IS NOT NULL GROUP BY category_name ORDER BY n DESC LIMIT 10"
@@ -609,6 +852,11 @@ class Database:
             "photos_downloaded": photos_done,
             "comments": comments,
             "likes": likes,
+            "venue_history": venue_history,
+            "lists": lists,
+            "list_items": list_items,
+            "tips": tips,
+            "standalone_photos": standalone_photos,
             "top_categories": top_categories,
             "top_cities": top_cities,
             "top_venues": top_venues,

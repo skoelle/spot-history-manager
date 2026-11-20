@@ -18,6 +18,11 @@ def _extension(row) -> str:
     return ext
 
 
+def photo_destination(cfg: FoursquareConfig, row) -> Path:
+    checkin_id = row["checkin_id"] or "_standalone"
+    return cfg.photos_dir / str(checkin_id) / f"{row['id']}{_extension(row)}"
+
+
 def _fetch(url: str, dest: Path, timeout: float, retries: int = 3) -> int:
     last: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -66,7 +71,7 @@ def download_pending(db: Database, cfg: FoursquareConfig, log=print, sleep: floa
     downloaded_bytes = 0
     for index, row in enumerate(rows, 1):
         url = row["url"] or photo_url(dict(row))
-        dest = cfg.photos_dir / row["checkin_id"] / f"{row['id']}{_extension(row)}"
+        dest = photo_destination(cfg, row)
         if dest.exists() and dest.stat().st_size > 0:
             db.set_photo_path(row["id"], str(dest.relative_to(cfg.data_dir)))
             done += 1

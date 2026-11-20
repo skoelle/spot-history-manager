@@ -125,3 +125,42 @@ class FoursquareAPI:
         response = self._request(f"checkins/{checkin_id}/comments", {})
         block = response.get("comments") or {}
         return block.get("items") or []
+
+    def photos(
+        self, limit: int = 500, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        params: dict[str, Any] = {"limit": str(limit), "offset": str(offset)}
+        response = self._request("users/self/photos", params)
+        block = response.get("photos") or {}
+        return block.get("items") or [], block.get("count")
+
+    def venue_history(
+        self, limit: int = 500, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        params: dict[str, Any] = {"limit": str(limit), "offset": str(offset)}
+        response = self._request("users/self/venuehistory", params)
+        block = response.get("venues") or {}
+        return block.get("items") or [], block.get("count")
+
+    def lists(self, limit: int = 50) -> list[dict[str, Any]]:
+        response = self._request("users/self/lists", {"limit": str(limit)})
+        block = response.get("lists") or {}
+        items: list[dict[str, Any]] = []
+        for group in block.get("groups") or []:
+            items.extend(group.get("items") or [])
+        return items
+
+    def list_details(
+        self, list_id: str, limit: int = 100, offset: int = 0
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": str(limit), "offset": str(offset)}
+        response = self._request(f"lists/{list_id}", params)
+        return response.get("list") or {}
+
+    def tips(
+        self, limit: int = 50, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int | None]:
+        params: dict[str, Any] = {"limit": str(limit), "offset": str(offset)}
+        response = self._request("users/self/tips", params)
+        block = response.get("tips") or {}
+        return block.get("items") or [], block.get("count")
