@@ -105,6 +105,25 @@ lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
   (5 Listen, ~150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
   (11) und alle Nutzerfotos (577; 562 mit Check-in, 15 standalone)
 
+## Yelp-Import
+
+```bash
+python3 -m spot_history yelp import
+python3 -m spot_history index build       # Foursquare-Index für Namensmatches
+python3 -m spot_history yelp geocode      # Nominatim, max. 1 Request/s
+python3 -m spot_history index build       # Städte in den Index übernehmen
+python3 -m spot_history yelp stats
+```
+
+- 462 Check-ins, 284 Orte, 92 mit Quellkoordinaten, 270 Medien
+- 135 Yelp-Kartenpunkte: 92 mit Quellkoordinaten, 43 über den Ort abgeleitet
+  (Badge „Ort abgeleitet“ in Liste und Karte)
+- 316 von 462 Visits mit Stadt: 135 über Nominatim, 181 über exakte
+  Namensmatches gegen Foursquare-Index und Export-URLs
+- 146 Visits bleiben ohne Stadt, 327 ohne Kartenpunkt
+- Der Geocoding-Cache liegt unter `data/yelp/` und ist gitignored;
+  `--force` erzwingt neue Nominatim-Requests
+
 ## Weitere Quellen
 
 Der Connector-Vertrag steht in [`CONNECTORS.md`](CONNECTORS.md). Connectoren

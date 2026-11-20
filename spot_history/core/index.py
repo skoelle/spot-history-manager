@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import Paths
-from ..connectors.base import BaseConnector, Visit
+from ..connectors.base import BaseConnector
 
 
 def iso_utc(timestamp: int) -> str:
@@ -20,25 +20,28 @@ def iso_local(timestamp: int, offset_minutes: int | None) -> str | None:
     return local.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def feature_for(visit: Visit) -> dict:
+def feature_for_row(row, photos: list[str]) -> dict:
     return {
         "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [visit.lng, visit.lat]},
+        "geometry": {"type": "Point", "coordinates": [row["lng"], row["lat"]]},
         "properties": {
-            "source": visit.source,
-            "visit_id": visit.source_visit_id,
-            "place": visit.place_name,
-            "place_id": visit.source_place_id,
-            "category": visit.category,
-            "visited_at": visit.visited_at,
-            "visited_at_utc": iso_utc(visit.visited_at),
-            "local_datetime": iso_local(visit.visited_at, visit.tz_offset),
-            "city": visit.city,
-            "country_code": visit.country_code,
-            "note": visit.note,
-            "url": visit.source_url,
-            "photos": [photo.local_path for photo in visit.photos if photo.local_path],
-            "photo_count": sum(1 for photo in visit.photos if photo.local_path),
+            "source": row["source"],
+            "visit_id": row["source_visit_id"],
+            "place": row["place_name"],
+            "place_id": row["place_id"],
+            "category": row["category"],
+            "visited_at": row["visited_at"],
+            "visited_at_utc": iso_utc(row["visited_at"]),
+            "local_datetime": row["local_datetime"],
+            "city": row["city"],
+            "state": row["state"],
+            "country_code": row["country_code"],
+            "note": row["note"],
+            "url": row["source_url"],
+            "has_coords": bool(row["has_coords"]),
+            "coords_derived": bool(row["coords_derived"]),
+            "photos": photos,
+            "photo_count": len(photos),
         },
     }
 
@@ -88,6 +91,8 @@ CREATE TABLE visits (
     note TEXT,
     source_url TEXT,
     extra_json TEXT,
+    has_coords INTEGER NOT NULL DEFAULT 0,
+    coords_derived INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source, source_visit_id)
 );
 
@@ -163,21 +168,25 @@ def build_index(
                     ).fetchone()
                     place_id = row[0]
                 extra = json.dumps(visit.extra, ensure_ascii=False) if visit.extra else None
+                has_coords = visit.lat is not None and visit.lng is not None
                 conn.execute(
                     "INSERT INTO visits (source, source_visit_id, place_id, visited_at, "
-                    "visited_at_utc, local_datetime, tz_offset, note, source_url, extra_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "visited_at_utc, local_datetime, tz_offset, note, source_url, extra_json, "
+                    "has_coords, coords_derived) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
                     "ON CONFLICT(source, source_visit_id) DO UPDATE SET "
                     "place_id=excluded.place_id, visited_at=excluded.visited_at, "
                     "visited_at_utc=excluded.visited_at_utc, "
                     "local_datetime=excluded.local_datetime, tz_offset=excluded.tz_offset, "
                     "note=excluded.note, source_url=excluded.source_url, "
-                    "extra_json=excluded.extra_json",
+                    "extra_json=excluded.extra_json, has_coords=excluded.has_coords, "
+                    "coords_derived=excluded.coords_derived",
                     (
                         visit.source, visit.source_visit_id, place_id, visit.visited_at,
                         iso_utc(visit.visited_at),
                         iso_local(visit.visited_at, visit.tz_offset),
                         visit.tz_offset, visit.note, visit.source_url, extra,
+                        1 if has_coords else 0,
                     ),
                 )
                 row = conn.execute(
@@ -202,9 +211,31 @@ def build_index(
                     total_photos += 1
                 total_visits += 1
                 source_counts[visit.source] = source_counts.get(visit.source, 0) + 1
-                if visit.lat is not None and visit.lng is not None:
-                    features.append(feature_for(visit))
-                    feature_count += 1
+        conn.execute(
+            "UPDATE visits SET coords_derived = CASE "
+            "WHEN has_coords = 0 AND place_id IS NOT NULL AND EXISTS ("
+            "SELECT 1 FROM places p WHERE p.id = visits.place_id "
+            "AND p.lat IS NOT NULL AND p.lng IS NOT NULL) "
+            "THEN 1 ELSE 0 END"
+        )
+        photo_paths: dict[int, list[str]] = {}
+        for photo_row in conn.execute(
+            "SELECT visit_id, local_path FROM photos "
+            "WHERE local_path IS NOT NULL AND local_path != '' "
+            "ORDER BY taken_at"
+        ):
+            photo_paths.setdefault(photo_row["visit_id"], []).append(photo_row["local_path"])
+        for visit_row in conn.execute(
+            "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
+            "v.note, v.source_url, v.has_coords, v.coords_derived, "
+            "p.source_place_id AS place_id, p.name AS place_name, p.lat, p.lng, "
+            "p.category, p.address, p.city, p.state, p.country_code "
+            "FROM visits v JOIN places p ON p.id = v.place_id "
+            "WHERE p.lat IS NOT NULL AND p.lng IS NOT NULL "
+            "ORDER BY v.visited_at"
+        ):
+            features.append(feature_for_row(visit_row, photo_paths.get(visit_row["id"], [])))
+        feature_count = len(features)
         indexed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.executemany(
             "INSERT INTO sources (name, kind, indexed_at, visits) VALUES (?, ?, ?, ?)",

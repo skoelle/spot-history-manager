@@ -107,8 +107,8 @@
         </div>
     </form>
 
-    {% if city_value == 'München' and has_yelp %}
-    <p class="hint">Hinweis: Yelp-Check-ins haben im Export kein Stadtfeld und erscheinen unter „Alle Städte“.</p>
+    {% if has_yelp %}
+    <p class="hint">Hinweis: Yelp-Punkte ohne Quellkoordinaten sind mit „Ort abgeleitet“ markiert. Yelp-Orte ohne Koordinaten und ohne verlässlichen Namensmatch haben keine Stadt.</p>
     {% endif %}
 
     <div class="box map-box">
@@ -144,6 +144,9 @@
             </div>
             <div class="visit-meta">
                 <span class="badge source-{{ visit.source }}">{{ visit.source }}</span>
+                {% if visit.coords_derived %}
+                <span class="badge derived">Ort abgeleitet</span>
+                {% endif %}
                 {% if visit.photo_count %}
                 <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
                 {% endif %}

@@ -1,0 +1,223 @@
+from __future__ import annotations
+
+import argparse
+import sqlite3
+from pathlib import Path
+
+from ..base import BaseConnector, Photo, Visit
+from .config import build_config
+from .db import Database, iso_range
+
+SOURCE = "yelp"
+
+
+class YelpConnector(BaseConnector):
+    name = SOURCE
+    kind = "import"
+
+    def add_parser(self, subparsers: argparse._SubParsersAction) -> None:
+        parser = subparsers.add_parser(self.name, help="Yelp HTML-Export importieren")
+        parser.set_defaults(connector=self)
+        commands = parser.add_subparsers(dest="command", required=True)
+
+        common = argparse.ArgumentParser(add_help=False)
+        common.add_argument("--export-dir", help="Yelp-Exportverzeichnis")
+        common.add_argument("--data-dir", help="Datenverzeichnis des Connectors")
+        common.add_argument("--db", help="Pfad zur SQLite-Datei")
+        common.add_argument("--no-media", action="store_true", help="keine Mediendateien kopieren")
+        common.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
+        common.add_argument("--geocode", action="store_true", help="nach dem Import Geocoding ausführen")
+
+        for command, help_text in (
+            ("import", "Export einlesen und in data/yelp/yelp.db schreiben"),
+            ("stats", "Zusammenfassung anzeigen"),
+        ):
+            sub = commands.add_parser(command, parents=[common], help=help_text)
+            sub.set_defaults(func=self.run)
+
+        geocode = commands.add_parser(
+            "geocode", parents=[common], help="Städte ermitteln und cachen"
+        )
+        geocode.add_argument("--force", action="store_true", help="Cache ignorieren")
+        geocode.add_argument("--sleep", type=float, default=1.0, help="Sekunden zwischen Nominatim-Requests")
+        geocode.add_argument("--limit", type=int, help="maximale Anzahl Reverse-Geocoding-Requests")
+        geocode.add_argument("--dry-run", action="store_true", help="nur anzeigen, nichts schreiben")
+        geocode.add_argument("--no-reverse", action="store_true", help="kein Nominatim-Reverse-Geocoding")
+        geocode.add_argument("--no-name-match", action="store_true", help="keine Namensmatches")
+        geocode.add_argument("--index-db", help="Pfad zum zentralen Index (Foursquare-Namensmatch)")
+        geocode.set_defaults(func=self.run)
+
+    def run(self, args: argparse.Namespace) -> int:
+        config = build_config(
+            export_dir=args.export_dir,
+            data_dir=args.data_dir,
+            db_path=args.db,
+            copy_media=not args.no_media,
+        )
+        if args.command == "stats":
+            return self.print_stats(config)
+        if args.command == "geocode":
+            return self.run_geocode(config, args)
+        from .importer import run_import
+
+        if getattr(args, "verbose", False):
+            print(f"Export:           {config.export_dir}")
+            print(f"Daten:            {config.data_dir}")
+            print(f"Datenbank:        {config.db_path}")
+        summary = run_import(config)
+        print(f"Check-ins:        {summary.counts.get('checkins', 0)}")
+        print(f"Kommentare:       {summary.counts.get('comments', 0)} "
+              f"({summary.linked_comments} verknüpft)")
+        print(f"Reviews:          {summary.counts.get('reviews', 0)}")
+        print(f"Lesezeichen:      {summary.counts.get('bookmarks', 0)}")
+        print(f"Sammlungen:       {summary.counts.get('collections', 0)} "
+              f"({summary.counts.get('collection_items', 0)} Einträge)")
+        print(f"Gespeicherte Orte:{summary.counts.get('saved_locations', 0):>4}")
+        print(f"Freunde:          {summary.counts.get('friends', 0)}")
+        print(f"Reactions:        {summary.counts.get('reactions', 0)}")
+        print(f"Suchen:           {summary.counts.get('searches', 0)}")
+        print(f"Fotos/Medien:     {summary.counts.get('photos', 0)} "
+              f"({summary.linked_photos} verknüpft)")
+        print(f"Medien kopiert:   {summary.media_copied} "
+              f"(übersprungen: {summary.media_skipped})")
+        if summary.missing_media:
+            print(f"Fehlende Medien:  {len(summary.missing_media)}")
+        print(f"Datenbank:        {config.db_path}")
+        if getattr(args, "geocode", False):
+            return self.run_geocode(config, args)
+        return 0
+
+    @staticmethod
+    def run_geocode(config, args) -> int:
+        from .geocode import geocode_places
+
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            print(f"Keine Yelp-Datenbank: {db_path}")
+            return 1
+        db = Database(db_path).open()
+        index_db = getattr(args, "index_db", None) or (
+            Path(config.data_dir).parent / "index" / "index.db"
+        )
+        try:
+            summary = geocode_places(
+                db,
+                index_db=index_db,
+                force=getattr(args, "force", False),
+                sleep=getattr(args, "sleep", 1.0),
+                limit=getattr(args, "limit", None),
+                dry_run=getattr(args, "dry_run", False),
+                reverse=not getattr(args, "no_reverse", False),
+                name_match=not getattr(args, "no_name_match", False),
+            )
+        finally:
+            db.close()
+        print(f"Reverse ok:       {summary.reverse_ok}")
+        print(f"Reverse Cache:    {summary.reverse_cached}")
+        print(f"Reverse leer:     {summary.reverse_not_found}")
+        print(f"Reverse Fehler:   {summary.reverse_errors}")
+        print(f"Foursquare ok:    {summary.foursquare_ok} "
+              f"(mehrdeutig: {summary.foursquare_ambiguous})")
+        print(f"URL ok:           {summary.url_ok} "
+              f"(Konflikte: {summary.url_conflict}, mehrdeutig: {summary.url_ambiguous})")
+        if not getattr(args, "dry_run", False):
+            print(f"Orte mit Stadt:   {summary.places_with_city}")
+            print(f"Visits mit Stadt: {summary.visits_with_city}")
+            print(f"Ohne Stadt:       {summary.unknown_places} Orte / "
+                  f"{summary.unknown_visits} Visits")
+        return 0
+
+    @staticmethod
+    def print_stats(config) -> int:
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            print(f"Keine Yelp-Datenbank: {db_path}")
+            return 1
+        db = Database(db_path).open()
+        try:
+            stats = db.stats()
+        finally:
+            db.close()
+        print(f"Check-ins:        {stats['checkins']}")
+        print(f"Mit Koordinaten:  {stats['with_coords']}")
+        print(f"Zeitraum:         {iso_range(stats)}")
+        print(f"Orte:             {stats['places']}")
+        print(f"Stadt:            {stats['visits_with_city']}/{stats['checkins']} Visits, "
+              f"{stats['places_with_city']}/{stats['places']} Orte")
+        for row in stats.get("geocode_sources", []):
+            print(f"  {row['source']:<28} {row['status']:<12} {row['count']}")
+        if stats.get("cities"):
+            print("Top-Städte:")
+            for row in stats["cities"]:
+                print(f"  {row['value']:<24} {row['count']}")
+        print(f"Kommentare:       {stats['comments']} ({stats['linked_comments']} verknüpft)")
+        print(f"Reviews:          {stats['reviews']}")
+        print(f"Lesezeichen:      {stats['bookmarks']}")
+        print(f"Sammlungen:       {stats['collections']} ({stats['collection_items']} Einträge)")
+        print(f"Gespeicherte Orte:{stats['saved_locations']:>4}")
+        print(f"Freunde:          {stats['friends']}")
+        print(f"Reactions:        {stats['reactions']}")
+        print(f"Suchen:           {stats['searches']}")
+        print(f"Fotos/Medien:     {stats['photos']} ({stats['linked_photos']} verknüpft)")
+        media_dir = Path(config.media_dir)
+        if media_dir.exists():
+            files = sum(1 for item in media_dir.rglob("*") if item.is_file())
+            print(f"Mediendateien:    {files}")
+        print(f"Datenbank:        {db_path}")
+        run = stats.get("last_run")
+        if run and run.get("finished_at"):
+            print(f"Letzter Import:   {run['finished_at']}")
+            if not run.get("ok"):
+                print(f"Importfehler:     {run.get('error') or '-'}")
+        return 0
+
+    def iter_visits(self):
+        config = build_config(copy_media=False)
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            return
+        photos: dict[str, list[Photo]] = {}
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            for row in conn.execute(
+                "SELECT id, checkin_id, created_at, local_path FROM photos "
+                "WHERE checkin_id IS NOT NULL ORDER BY created_at"
+            ):
+                photos.setdefault(row["checkin_id"], []).append(
+                    Photo(
+                        source_photo_id=row["id"],
+                        local_path=row["local_path"],
+                        taken_at=row["created_at"],
+                    )
+                )
+            rows = conn.execute(
+                "SELECT c.id, c.visited_at, c.tz_offset, c.place_key, c.place_name, "
+                "c.lat, c.lng, c.note, c.status, "
+                "p.city, p.state, p.country_code FROM checkins c "
+                "LEFT JOIN places p ON p.place_key = c.place_key "
+                "ORDER BY c.place_name, (c.lat IS NOT NULL), c.visited_at"
+            )
+            for row in rows:
+                has_coords = row["lat"] is not None and row["lng"] is not None
+                yield Visit(
+                    source=SOURCE,
+                    source_visit_id=row["id"],
+                    visited_at=int(row["visited_at"]),
+                    lat=row["lat"],
+                    lng=row["lng"],
+                    place_name=row["place_name"],
+                    source_place_id=row["place_key"],
+                    city=row["city"],
+                    state=row["state"],
+                    country_code=row["country_code"],
+                    note=row["note"],
+                    tz_offset=row["tz_offset"],
+                    photos=photos.get(row["id"], []),
+                    extra={"status": row["status"], "has_coords": has_coords},
+                )
+        finally:
+            conn.close()
+
+
+CONNECTOR = YelpConnector()

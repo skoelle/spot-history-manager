@@ -47,6 +47,9 @@
         if (visit.category) {
             parts.push(escapeHtml(visit.category));
         }
+        if (visit.coords_derived) {
+            parts.push('<span class="badge derived">Ort abgeleitet</span>');
+        }
         if (visit.url) {
             parts.push(`<a href="${escapeHtml(visit.url)}" target="_blank" rel="noopener">Original</a>`);
         }

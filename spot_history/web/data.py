@@ -121,12 +121,15 @@ def _format_row(row: sqlite3.Row) -> dict:
         "note": row["note"],
         "source_url": row["source_url"],
         "photo_count": row["photo_count"] or 0,
+        "has_coords": bool(row["has_coords"]),
+        "coords_derived": bool(row["coords_derived"]),
     }
 
 
 VISIT_SELECT = (
     "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
-    "v.note, v.source_url, p.name AS place_name, p.category, p.address, p.city, "
+    "v.note, v.source_url, v.has_coords, v.coords_derived, "
+    "p.name AS place_name, p.category, p.address, p.city, "
     "p.lat, p.lng, "
     "(SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count "
     f"{FROM}"
@@ -168,6 +171,8 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "time": _format_moment(row["local_datetime"], row["visited_at"]).strftime("%H:%M"),
             "source": row["source"],
             "url": row["source_url"],
+            "has_coords": bool(row["has_coords"]),
+            "coords_derived": bool(row["coords_derived"]),
         }
         for row in rows
     ]
