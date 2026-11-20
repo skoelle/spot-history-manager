@@ -4,12 +4,13 @@ Sammelt Check-in-/Besuchshistorien aus mehreren Diensten, speichert jede Quelle
 in einer eigenen SQLite-Datenbank und baut daraus einen zentralen, rebuildbaren
 Index plus GeoJSON für eine spätere OpenStreetMap-Karte.
 
-Aktuell implementiert: **Foursquare/Swarm** (API-Sync).
-Geplant: **Yelp** (einmaliger HTML-Import), **Google Timeline** (Import).
+Aktuell implementiert: **Foursquare/Swarm** (API-Sync) und **Yelp** (einmaliger HTML-Import).
+Geplant: **Google Timeline** (Import).
 
 ## Voraussetzungen
 
-- Python 3.10+ (nur Standardbibliothek, keine pip-Abhängigkeiten)
+- Python 3.10+; Sync, Index und Importe nutzen nur die Standardbibliothek
+- Für die Web-Oberfläche: FastAPI, uvicorn und Jinja2 aus `requirements.txt`
 - `.env` mit `FOURSQUARE_OAUTH_TOKEN`
 
 ```bash
@@ -37,10 +38,15 @@ python3 -m spot_history foursquare stats
 
 # Alle Quellen in den zentralen Index + GeoJSON überführen
 python3 -m spot_history index build
+
+# Web-Oberfläche (Liste + OpenStreetMap-Karte)
+.venv/bin/pip install -r requirements.txt   # einmalig
+./web.sh                                    # 0.0.0.0:8345
 ```
 
 Optionen beim Foursquare-Connector: `--data-dir`, `--db`, `--sleep`,
-`--no-photos`, `--no-export`, `--verbose`.
+`--no-photos`, `--no-export`, `--verbose`. Die Web-Oberfläche liest nur den
+Index; `index build` läuft getrennt davor.
 
 ## Datenlayout
 
@@ -50,7 +56,7 @@ data/
 │   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Kommentare, Likes, Sync-Status)
 │   ├── exports/               checkins.json/csv, photos.csv, comments.csv, likes.csv
 │   └── photos/<checkin_id>/   Bilddateien
-├── yelp/                      (kommt später) yelp.db + media/
+├── yelp/                      yelp.db + media/ (HTML-Import)
 ├── google/                    (kommt später) google.db
 ├── index/index.db             zentraler, rebuildbarer Index
 └── exports/visits.geojson     Kartenpunkte aller Quellen
@@ -58,6 +64,19 @@ data/
 
 Die Quell-DBs sind die Wahrheit. Der Index wird bei jedem `index build` neu aus
 den Connectors erzeugt und kann gefahrlos gelöscht werden.
+
+## Web-Oberfläche
+
+`./web.sh` startet FastAPI/Jinja auf `http://<host>:8345` (Bind `0.0.0.0`).
+Die Seite zeigt standardmäßig alle Besuche in München, mit Filtern für Stadt,
+Jahr, Kategorie, Quelle und Freitext. Oben eine Leaflet-Karte mit
+OpenStreetMap-Tiles (Leaflet liegt lokal unter
+`spot_history/web/static/vendor/leaflet/`), darunter die Liste mit 60 Treffern
+pro Seite. Klick auf Karte und Liste ist synchronisiert.
+
+Die Oberfläche hat **keine Authentifizierung** und ist für LAN/interne Nutzung
+gedacht. Fotos werden noch nicht als Thumbnails angezeigt, nur ihre Anzahl und
+der Link zum Original.
 
 ## Zentraler Index
 

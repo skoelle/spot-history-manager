@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Check-ins – Spot History</title>
+    <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>
+            <a href="/">
+                <img src="/static/favicon.svg" alt="">
+                Check-ins
+            </a>
+        </h1>
+        <div class="meta">
+            {% if city_value %}{{ city_value }} · {% endif %}{{ stats.total }} Besuche
+            {% if built_at %} · Stand {{ built_at }}{% endif %}
+        </div>
+    </div>
+
+    {% if index_missing %}
+    <div class="empty-state">
+        Der Index fehlt unter <code>{{ index_path }}</code>.<br>
+        Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
+    </div>
+    {% else %}
+    <div class="stat-grid">
+        <div class="box stat-box">
+            <div class="box-title">Besuche</div>
+            <div class="stat-value">{{ stats.total }}</div>
+            <div class="stat-label">im aktuellen Filter</div>
+        </div>
+        <div class="box stat-box">
+            <div class="box-title">Mit Fotos</div>
+            <div class="stat-value">{{ stats.with_photos }}</div>
+            <div class="stat-label">Check-ins mit Bildern</div>
+        </div>
+        <div class="box stat-box">
+            <div class="box-title">Orte</div>
+            <div class="stat-value">{{ stats.places }}</div>
+            <div class="stat-label">verschiedene Venues</div>
+        </div>
+        <div class="box stat-box">
+            <div class="box-title">Zeitraum</div>
+            <div class="stat-value stat-value-small">{{ range_label }}</div>
+            <div class="stat-label">erster bis letzter Besuch</div>
+        </div>
+    </div>
+
+    <form class="filters box" method="get" action="/">
+        <label class="field">
+            <span>Stadt</span>
+            <select name="city">
+                <option value="">Alle Städte</option>
+                {% for option in options.cities %}
+                <option value="{{ option.value }}" {% if option.value == city_value %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Jahr</span>
+            <select name="year">
+                <option value="">Alle Jahre</option>
+                {% for option in options.years %}
+                <option value="{{ option.value }}" {% if option.value == query.year %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Kategorie</span>
+            <select name="category">
+                <option value="">Alle Kategorien</option>
+                {% for option in options.categories %}
+                <option value="{{ option.value }}" {% if option.value == query.category %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Quelle</span>
+            <select name="source">
+                <option value="">Alle Quellen</option>
+                {% for option in options.sources %}
+                <option value="{{ option.value }}" {% if option.value == query.source %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field field-search">
+            <span>Suche</span>
+            <input type="search" name="q" value="{{ query.q }}" placeholder="Ort, Kategorie, Adresse, Notiz ...">
+        </label>
+        <div class="filter-actions">
+            <button type="submit">Suchen</button>
+            <a class="reset-link" href="/">Zurücksetzen</a>
+        </div>
+    </form>
+
+    {% if city_value == 'München' and has_yelp %}
+    <p class="hint">Hinweis: Yelp-Check-ins haben im Export kein Stadtfeld und erscheinen unter „Alle Städte“.</p>
+    {% endif %}
+
+    <div class="box map-box">
+        <div class="box-title">Karte · {{ map_points|length }} Punkte</div>
+        <div id="map"></div>
+        {% if not map_points %}
+        <div class="map-empty">Keine Koordinaten für diese Filter.</div>
+        {% endif %}
+    </div>
+
+    <div class="list-header">
+        <span class="box-title">Check-ins</span>
+        <span class="muted">{{ total }} Treffer · Seite {{ page }} von {{ pages }}</span>
+    </div>
+
+    <div class="visits-list">
+        {% for visit in visits %}
+        <article class="visit-card" data-id="{{ visit.id }}"
+                 {% if visit.lat is not none and visit.lng is not none %}data-lat="{{ visit.lat }}" data-lng="{{ visit.lng }}"{% endif %}>
+            <div class="visit-date">
+                <span class="day">{{ visit.day }}</span>
+                <span class="month">{{ visit.month }}</span>
+                <span class="year">{{ visit.year }}</span>
+            </div>
+            <div class="visit-body">
+                <div class="visit-title">{{ visit.place_name or 'Unbekannter Ort' }}</div>
+                <div class="visit-sub">
+                    {% if visit.category %}{{ visit.category }}{% endif %}
+                    {% if visit.city %} · {{ visit.city }}{% endif %}
+                    {% if visit.address %} · {{ visit.address }}{% endif %}
+                </div>
+                {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}
+            </div>
+            <div class="visit-meta">
+                <span class="badge source-{{ visit.source }}">{{ visit.source }}</span>
+                {% if visit.photo_count %}
+                <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
+                {% endif %}
+                <span class="visit-time">{{ visit.time }}</span>
+                {% if visit.source_url %}
+                <a class="original-link" href="{{ visit.source_url }}" target="_blank" rel="noopener">Original</a>
+                {% endif %}
+            </div>
+        </article>
+        {% else %}
+        <div class="empty-state">Keine Check-ins für diese Filter.</div>
+        {% endfor %}
+    </div>
+
+    <div class="pagination">
+        {% if prev_url %}<a class="button" href="{{ prev_url }}">Zurück</a>{% endif %}
+        <span class="muted">Seite {{ page }} von {{ pages }}</span>
+        {% if next_url %}<a class="button" href="{{ next_url }}">Weiter</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<script id="visits-data" type="application/json">{{ map_points|tojson }}</script>
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
