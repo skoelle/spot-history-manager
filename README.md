@@ -10,7 +10,7 @@ Geplant: **Google Timeline** (Import).
 ## Voraussetzungen
 
 - Python 3.10+; Sync, Index und Importe nutzen nur die Standardbibliothek
-- Für die Web-Oberfläche: FastAPI, uvicorn und Jinja2 aus `requirements.txt`
+- Für die Web-Oberfläche: FastAPI, uvicorn, Jinja2 und Pillow aus `requirements.txt`
 - `.env` mit `FOURSQUARE_OAUTH_TOKEN`
 
 ```bash
@@ -36,13 +36,16 @@ python3 -m spot_history foursquare sync
 # Zusammenfassung
 python3 -m spot_history foursquare stats
 
-# API-Endpunkte nur lesend prüfen (ohne Places API)
+# API-Endpunkte nur lesend prüfen (v2 + Places API)
 python3 -m spot_history foursquare probe
 
 # Alle Quellen in den zentralen Index + GeoJSON überführen
 python3 -m spot_history index build
 
-# Web-Oberfläche (Liste + OpenStreetMap-Karte)
+# Thumbnails für die Web-UI (Pillow, einmalig bzw. nach neuen Fotos)
+.venv/bin/python -m spot_history index thumbs
+
+# Web-Oberfläche (Liste + OpenStreetMap-Karte + Fotos)
 .venv/bin/pip install -r requirements.txt   # einmalig
 ./web.sh                                    # 0.0.0.0:8345
 ```
@@ -60,8 +63,9 @@ data/
 │   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Listen, Tipps, Profil, Sync-Status)
 │   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues (CSV)
 │   ├── profile/               lokales Profilbild
-│   └── photos/<checkin_id>/   Bilddateien (Standalone unter photos/_standalone/)
-├── yelp/                      yelp.db + media/ (HTML-Import)
+│   ├── photos/<checkin_id>/   Bilddateien (Standalone unter photos/_standalone/)
+│   └── thumbs/                320-px-Vorschaubilder für die Web-UI
+├── yelp/                      yelp.db + media/ + thumbs/ (HTML-Import)
 ├── google/                    (kommt später) google.db
 ├── index/index.db             zentraler, rebuildbarer Index
 └── exports/visits.geojson     Kartenpunkte aller Quellen
@@ -82,16 +86,29 @@ pro Seite. Klick auf Karte und Liste ist synchronisiert.
 Zusätzlich gibt es eine Profilkarte mit lokal gespeichertem Avatar sowie eine
 Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{id}`.
 Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl, ersten und
-letzten Besuch, Fotoanzahl und die Besuchshistorie. Foursquare-Orte verlinken
-auf ihr Original.
+letzten Besuch, Fotoanzahl, Fotogalerie und die Besuchshistorie.
+Foursquare-Orte verlinken auf ihr Original.
 
-Lokale Bilder werden über `/media/...` ausgeliefert. Erlaubt sind nur Bilddateien
-unter `data/*/profile/`, `data/*/photos/` und `data/*/media/`; Datenbanken,
-Exporte und Pfad-Traversal werden blockiert.
+Die Navigation führt zu **Check-ins**, **Orten** und **Fotos**. Die Fotoseite
+`/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle, Suche) und
+Pagination; Klick öffnet eine Lightbox mit dem Original. Check-in-Karten zeigen
+bis zu drei Vorschaubilder, Venue-Detailseiten eine Galerie. Yelp-Videos werden
+als eigener Video-Eintrag dargestellt.
+
+Der Karten-Popup zeigt Quelle, Kategorie, Adresse/Stadt und einen direkten Link
+zum Ort (`/venues/{id}`), nicht mehr den Foursquare-Original-Link.
+
+Lokale Bilder und Thumbnails werden über `/media/...` ausgeliefert. Erlaubt sind
+nur Bild- und Videodateien unter `data/*/profile/`, `data/*/photos/`,
+`data/*/media/` und `data/*/thumbs/`; Datenbanken, Exporte und Pfad-Traversal
+werden blockiert.
+
+Thumbnails werden mit `.venv/bin/python -m spot_history index thumbs` erzeugt
+(320 px, nach neuen Fotos erneut ausführen; `--force` erzwingt Neuberechnung).
+Ohne Thumbnails fällt die Web-UI auf die Originaldateien zurück.
 
 Die Oberfläche hat **keine Authentifizierung** und ist für LAN/interne Nutzung
-gedacht. Fotos werden noch nicht als Thumbnails in der Check-in-Liste angezeigt,
-nur ihre Anzahl und der Link zum Original; der Profil-Avatar ist sichtbar.
+gedacht.
 
 ## Zentraler Index
 
@@ -129,11 +146,19 @@ lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
   angezeigt
 - Venue-Details (Öffnungszeiten, Preis, Rating, Venue-Fotos/-Tipps) sind aktuell
   nicht abrufbar: `/v2/venues/{id}` liefert 402, die Places-API mit
-  Premium-Feldern 429. Die 1036 Venue-Snapshots aus den Check-ins reichen für
-  Liste und Detailseite.
+  Premium-Feldern, `/photos`, `/tips` und `/places/ask` 429. Die 1036
+  Venue-Snapshots aus den Check-ins reichen für Liste und Detailseite.
+- Die Places-API (`https://places-api.foursquare.com`, `FOURSQUARE_SERVICE_API_KEY`)
+  liefert dagegen für **alle 1036 Venues** Baseline-Details (200): aktueller
+  Name, Adresse, Stadt/Region/PLZ/Land, Koordinaten, Kategorien, Telefon (747),
+  Website (748), E-Mail (395) und Social-Media-IDs. Der Client liegt in
+  `places_api.py`; gespeichert wird davon noch nichts.
+- `places/search`, `autocomplete`, `places/match` und
+  `geotagging/candidates` antworten mit 200, `places/resolve` mit 401
+  (fehlende Berechtigung).
 - `foursquare probe` prüft die Konto-Endpunkte rein lesend; `friends`/`badges`
-  liefern 404, `events` 403, `likes`/`herenow` 402. Die Places-API wird bewusst
-  nicht geprüft.
+  liefern 404, `events` 403, `likes`/`herenow` 402. Zusätzlich werden
+  Places-API-Baseline, Premium-Felder, Fotos und Tipps geprüft.
 
 ## Yelp-Import
 

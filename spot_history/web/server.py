@@ -21,8 +21,8 @@ app = FastAPI(title="Spot History", version="0.1.0")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
-MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-MEDIA_DIRECTORIES = {"profile", "photos", "media"}
+MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".mov"}
+MEDIA_DIRECTORIES = {"profile", "photos", "media", "thumbs"}
 
 
 def _range_label(stats: dict) -> str:
@@ -43,6 +43,12 @@ def _venues_page_url(query: dict, page: int) -> str:
     params = {key: value for key, value in query.items() if value}
     params["page"] = page
     return "/venues?" + urlencode(params)
+
+
+def _photos_page_url(query: dict, page: int) -> str:
+    params = {key: value for key, value in query.items() if value}
+    params["page"] = page
+    return "/photos?" + urlencode(params)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -79,6 +85,7 @@ def index(
                 "range_label": "—",
                 "has_yelp": False,
                 "profile": None,
+                "photos_by_visit": {},
             },
         )
 
@@ -103,6 +110,9 @@ def index(
         page = min(max(1, page), pages)
         visits = web_data.query_visits(
             conn, filters, web_data.PAGE_SIZE, (page - 1) * web_data.PAGE_SIZE
+        )
+        photos_by_visit = web_data.photos_for_visits(
+            conn, [visit["id"] for visit in visits]
         )
         map_points = web_data.query_map_points(conn, filters)
         stats = web_data.load_stats(conn, filters)
@@ -139,6 +149,7 @@ def index(
             "range_label": _range_label(stats),
             "has_yelp": any(option["value"] == "yelp" for option in options["sources"]),
             "profile": profile,
+            "photos_by_visit": photos_by_visit,
         },
     )
 
@@ -222,6 +233,87 @@ def venues(
     )
 
 
+@app.get("/photos", response_class=HTMLResponse)
+def photos(
+    request: Request,
+    city: str | None = None,
+    year: str | None = None,
+    source: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+) -> HTMLResponse:
+    index_db = paths.index_db
+    if not index_db.exists():
+        return templates.TemplateResponse(
+            request,
+            "photos.html",
+            {
+                "request": request,
+                "index_missing": True,
+                "index_path": str(index_db),
+                "photos": [],
+                "options": {"cities": [], "years": [], "categories": [], "sources": []},
+                "total": 0,
+                "page": 1,
+                "pages": 1,
+                "prev_url": None,
+                "next_url": None,
+                "query": {},
+                "profile": None,
+            },
+        )
+
+    conn = web_data.connect(index_db)
+    try:
+        profiles = web_data.load_profiles(conn)
+        profile = next(
+            (item for item in profiles if item["source"] == "foursquare"),
+            profiles[0] if profiles else None,
+        )
+        options = web_data.load_options(conn)
+        filters = web_data.PhotoFilters(
+            city=(city or "").strip() or None,
+            year=(year or "").strip() or None,
+            source=(source or "").strip() or None,
+            q=(q or "").strip() or None,
+        )
+        total = web_data.count_photos(conn, filters)
+        pages = max(1, (total + web_data.PHOTO_PAGE_SIZE - 1) // web_data.PHOTO_PAGE_SIZE)
+        page = min(max(1, page), pages)
+        photos = web_data.query_photos(
+            conn, filters, web_data.PHOTO_PAGE_SIZE, (page - 1) * web_data.PHOTO_PAGE_SIZE
+        )
+        built_at = web_data.build_time(conn)
+    finally:
+        conn.close()
+
+    query = {
+        "city": city or "",
+        "year": year or "",
+        "source": source or "",
+        "q": q or "",
+    }
+    return templates.TemplateResponse(
+        request,
+        "photos.html",
+        {
+            "request": request,
+            "index_missing": False,
+            "index_path": str(index_db),
+            "photos": photos,
+            "options": options,
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "prev_url": _photos_page_url(query, page - 1) if page > 1 else None,
+            "next_url": _photos_page_url(query, page + 1) if page < pages else None,
+            "query": query,
+            "profile": profile,
+            "built_at": built_at,
+        },
+    )
+
+
 @app.get("/venues/{place_id}", response_class=HTMLResponse)
 def venue_detail(
     request: Request, place_id: int, page: int = 1
@@ -246,6 +338,7 @@ def venue_detail(
         visits = web_data.query_visits(
             conn, filters, web_data.PAGE_SIZE, (page - 1) * web_data.PAGE_SIZE
         )
+        photos = web_data.photos_for_place(conn, place_id, limit=24)
     finally:
         conn.close()
     return templates.TemplateResponse(
@@ -255,6 +348,7 @@ def venue_detail(
             "request": request,
             "venue": venue,
             "visits": visits,
+            "photos": photos,
             "total": total,
             "page": page,
             "pages": pages,

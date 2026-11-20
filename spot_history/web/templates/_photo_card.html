@@ -1,0 +1,22 @@
+<figure class="photo-card">
+    {% if photo.is_video %}
+    <video class="photo-media" controls preload="metadata" src="{{ photo.url }}"></video>
+    {% else %}
+    <a class="photo-media-link" href="{{ photo.url }}" data-photo="{{ photo.url }}"
+       data-type="image" data-caption="{{ photo.place_name or 'Unbekannter Ort' }} · {{ photo.date }}">
+        <img src="{{ photo.thumb_url }}" alt="{{ photo.place_name or 'Foto' }}" loading="lazy">
+    </a>
+    {% endif %}
+    <figcaption class="photo-caption">
+        <strong>
+            {% if photo.place_id %}
+            <a href="/venues/{{ photo.place_id }}">{{ photo.place_name or 'Unbekannter Ort' }}</a>
+            {% else %}
+            {{ photo.place_name or 'Unbekannter Ort' }}
+            {% endif %}
+        </strong>
+        <span>{{ photo.date }}{% if photo.city %} · {{ photo.city }}{% endif %}</span>
+        <span class="badge source-{{ photo.source }}">{{ photo.source }}</span>
+        {% if photo.is_video %}<span class="badge">Video</span>{% endif %}
+    </figcaption>
+</figure>

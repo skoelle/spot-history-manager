@@ -42,16 +42,29 @@
         });
         const parts = [
             `<strong>${escapeHtml(visit.place || "Unbekannter Ort")}</strong>`,
-            `${escapeHtml(visit.date)} ${escapeHtml(visit.time)}`,
+            `${escapeHtml(visit.date)} ${escapeHtml(visit.time)} <span class="badge source-${escapeHtml(visit.source)}">${escapeHtml(visit.source)}</span>`,
         ];
+        const details = [];
         if (visit.category) {
-            parts.push(escapeHtml(visit.category));
+            details.push(escapeHtml(visit.category));
+        }
+        if (visit.address) {
+            details.push(escapeHtml(visit.address));
+        }
+        if (visit.city) {
+            details.push(escapeHtml(visit.city));
+        }
+        if (details.length) {
+            parts.push(details.join(" · "));
+        }
+        if (visit.photo_count) {
+            parts.push(`${visit.photo_count} Foto${visit.photo_count === 1 ? "" : "s"}`);
         }
         if (visit.coords_derived) {
             parts.push('<span class="badge derived">Ort abgeleitet</span>');
         }
-        if (visit.url) {
-            parts.push(`<a href="${escapeHtml(visit.url)}" target="_blank" rel="noopener">Original</a>`);
+        if (visit.place_id) {
+            parts.push(`<a href="/venues/${visit.place_id}">Zum Ort</a>`);
         }
         marker.bindPopup(parts.join("<br>"));
         marker.addTo(map);
@@ -67,7 +80,7 @@
 
     document.querySelectorAll(".visit-card[data-id]").forEach((card) => {
         card.addEventListener("click", (event) => {
-            if (event.target.closest("a")) {
+            if (event.target.closest("a") || event.target.closest("[data-photo]")) {
                 return;
             }
             const marker = markers.get(String(card.dataset.id));

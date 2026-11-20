@@ -14,6 +14,9 @@ class FoursquareConfig:
     db_path: Path | None = None
     api_version: str = "20240101"
     base_url: str = "https://api.foursquare.com/v2"
+    service_api_key: str = ""
+    places_base_url: str = "https://places-api.foursquare.com"
+    places_api_version: str = "2025-06-17"
     page_limit: int = 250
     sleep: float = 0.3
     timeout: float = 60.0
@@ -57,6 +60,7 @@ def build_config(
         token=token,
         data_dir=Path(data_dir) if data_dir else ROOT / "data" / "foursquare",
         db_path=Path(db_path) if db_path else None,
+        service_api_key=os.environ.get("FOURSQUARE_SERVICE_API_KEY", "").strip(),
         sleep=0.3 if sleep is None else sleep,
         download_photos=download_photos,
         export=export,

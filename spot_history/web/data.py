@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..core.config import ROOT
+from ..core.media import is_video, thumb_relpath
+
 PAGE_SIZE = 60
+PHOTO_PAGE_SIZE = 48
 MAP_LIMIT = 5000
 DEFAULT_CITY = "München"
 MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
@@ -30,6 +34,15 @@ class VenueFilters:
     category: str | None = None
     source: str | None = None
     q: str | None = None
+
+
+@dataclass(frozen=True)
+class PhotoFilters:
+    city: str | None = None
+    year: str | None = None
+    source: str | None = None
+    q: str | None = None
+    place_id: int | None = None
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -125,10 +138,13 @@ def _format_row(row: sqlite3.Row) -> dict:
         "day": moment.strftime("%d"),
         "month": MONTHS[moment.month - 1],
         "year": moment.strftime("%Y"),
+        "place_id": row["place_id"],
         "place_name": row["place_name"],
         "category": row["category"],
         "address": row["address"],
         "city": row["city"],
+        "state": row["state"],
+        "country_code": row["country_code"],
         "lat": row["lat"],
         "lng": row["lng"],
         "note": row["note"],
@@ -142,8 +158,8 @@ def _format_row(row: sqlite3.Row) -> dict:
 VISIT_SELECT = (
     "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
     "v.note, v.source_url, v.has_coords, v.coords_derived, "
-    "p.name AS place_name, p.category, p.address, p.city, "
-    "p.lat, p.lng, "
+    "p.id AS place_id, p.name AS place_name, p.category, p.address, p.city, "
+    "p.state, p.country_code, p.lat, p.lng, "
     "(SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count "
     f"{FROM}"
 )
@@ -179,16 +195,135 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "lat": row["lat"],
             "lng": row["lng"],
             "place": row["place_name"],
+            "place_id": row["place_id"],
             "category": row["category"],
+            "address": row["address"],
+            "city": row["city"],
+            "state": row["state"],
+            "country_code": row["country_code"],
             "date": _format_moment(row["local_datetime"], row["visited_at"]).strftime("%d.%m.%Y"),
             "time": _format_moment(row["local_datetime"], row["visited_at"]).strftime("%H:%M"),
             "source": row["source"],
             "url": row["source_url"],
+            "photo_count": row["photo_count"] or 0,
             "has_coords": bool(row["has_coords"]),
             "coords_derived": bool(row["coords_derived"]),
         }
         for row in rows
     ]
+
+
+PHOTO_SELECT = (
+    "SELECT ph.source, ph.source_photo_id, ph.local_path, "
+    "ph.url AS photo_url, ph.taken_at, v.id AS visit_id, v.visited_at, "
+    "v.local_datetime, v.source_url, p.id AS place_id, p.name AS place_name, "
+    "p.category, p.address, p.city "
+    "FROM photos ph JOIN visits v ON v.id = ph.visit_id "
+    "LEFT JOIN places p ON p.id = v.place_id"
+)
+
+
+def photo_where_clause(filters: PhotoFilters) -> tuple[str, list]:
+    clauses: list[str] = []
+    params: list = []
+    if filters.city:
+        clauses.append("p.city = ?")
+        params.append(filters.city)
+    if filters.year:
+        clauses.append("strftime('%Y', v.visited_at, 'unixepoch') = ?")
+        params.append(filters.year)
+    if filters.source:
+        clauses.append("ph.source = ?")
+        params.append(filters.source)
+    if filters.place_id is not None:
+        clauses.append("v.place_id = ?")
+        params.append(filters.place_id)
+    if filters.q:
+        like = f"%{filters.q}%"
+        clauses.append(
+            "(p.name LIKE ? OR p.category LIKE ? OR p.address LIKE ? OR p.city LIKE ?)"
+        )
+        params.extend([like, like, like, like])
+    if not clauses:
+        return "", params
+    return " WHERE " + " AND ".join(clauses), params
+
+
+def _format_photo(row: sqlite3.Row) -> dict:
+    source = row["source"]
+    photo_id = row["source_photo_id"]
+    local_path = row["local_path"] or ""
+    video = bool(local_path) and is_video(local_path)
+    source_url = f"/media/{local_path}" if local_path else (row["photo_url"] or "")
+    thumb_url = source_url
+    if local_path and not video:
+        relative = thumb_relpath(source, photo_id)
+        if (ROOT / relative).is_file():
+            thumb_url = f"/media/{relative}"
+    moment = _format_moment(row["local_datetime"], row["visited_at"])
+    return {
+        "id": f"{source}:{photo_id}",
+        "source": source,
+        "visit_id": row["visit_id"],
+        "place_id": row["place_id"],
+        "place_name": row["place_name"],
+        "category": row["category"],
+        "address": row["address"],
+        "city": row["city"],
+        "date": moment.strftime("%d.%m.%Y"),
+        "time": moment.strftime("%H:%M"),
+        "source_url": row["source_url"],
+        "url": source_url,
+        "thumb_url": thumb_url,
+        "is_video": video,
+        "is_image": not video,
+    }
+
+
+def count_photos(conn: sqlite3.Connection, filters: PhotoFilters) -> int:
+    where, params = photo_where_clause(filters)
+    sql = (
+        "SELECT COUNT(*) AS n FROM photos ph JOIN visits v ON v.id = ph.visit_id "
+        f"LEFT JOIN places p ON p.id = v.place_id{where}"
+    )
+    return int(conn.execute(sql, params).fetchone()["n"] or 0)
+
+
+def query_photos(
+    conn: sqlite3.Connection, filters: PhotoFilters, limit: int, offset: int
+) -> list[dict]:
+    where, params = photo_where_clause(filters)
+    sql = (
+        f"{PHOTO_SELECT}{where} "
+        "ORDER BY COALESCE(ph.taken_at, v.visited_at) DESC LIMIT ? OFFSET ?"
+    )
+    rows = conn.execute(sql, [*params, limit, offset]).fetchall()
+    return [_format_photo(row) for row in rows]
+
+
+def photos_for_visits(
+    conn: sqlite3.Connection, visit_ids: list[int], limit_per_visit: int = 3
+) -> dict[int, list[dict]]:
+    if not visit_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in visit_ids)
+    rows = conn.execute(
+        f"{PHOTO_SELECT} WHERE v.id IN ({placeholders}) "
+        "ORDER BY COALESCE(ph.taken_at, v.visited_at)",
+        visit_ids,
+    ).fetchall()
+    result: dict[int, list[dict]] = {}
+    for row in rows:
+        bucket = result.setdefault(row["visit_id"], [])
+        if len(bucket) < limit_per_visit:
+            bucket.append(_format_photo(row))
+    return result
+
+
+def photos_for_place(
+    conn: sqlite3.Connection, place_id: int, limit: int = 24
+) -> list[dict]:
+    return query_photos(conn, PhotoFilters(place_id=place_id), limit, 0)
 
 
 def load_stats(conn: sqlite3.Connection, filters: Filters) -> dict:

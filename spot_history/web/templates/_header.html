@@ -1,0 +1,15 @@
+<div class="header">
+    <div class="header-left">
+        <h1>
+            <a href="/">
+                <img src="/static/favicon.svg" alt="">
+                Check-ins
+            </a>
+        </h1>
+        <nav class="header-nav">
+            <a class="nav-link {% if active_page == 'venues' %}active{% endif %}" href="/venues">Orte</a>
+            <a class="nav-link {% if active_page == 'photos' %}active{% endif %}" href="/photos">Fotos</a>
+        </nav>
+    </div>
+    <div class="meta">{{ header_meta|safe }}</div>
+</div>

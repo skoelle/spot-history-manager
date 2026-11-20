@@ -8,17 +8,10 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{% set active_page = 'venues' %}
+{% set header_meta %}{{ total }} Orte{% if profile %} · {{ profile.display_name }}{% endif %}{% endset %}
 <div class="container">
-    <div class="header">
-        <h1>
-            <a href="/">
-                <img src="/static/favicon.svg" alt="">
-                Check-ins
-            </a>
-            <a class="nav-link" href="/venues">Orte</a>
-        </h1>
-        <div class="meta">{{ total }} Orte{% if profile %} · {{ profile.display_name }}{% endif %}</div>
-    </div>
+    {% include "_header.html" %}
 
     {% if index_missing %}
     <div class="empty-state">

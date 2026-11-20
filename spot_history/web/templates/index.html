@@ -9,20 +9,10 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{% set active_page = 'home' %}
+{% set header_meta %}{% if city_value %}{{ city_value }} · {% endif %}{{ stats.total }} Besuche{% if built_at %} · Stand {{ built_at }}{% endif %}{% endset %}
 <div class="container">
-    <div class="header">
-        <h1>
-            <a href="/">
-                <img src="/static/favicon.svg" alt="">
-                Check-ins
-            </a>
-            <a class="nav-link" href="/venues">Orte</a>
-        </h1>
-        <div class="meta">
-            {% if city_value %}{{ city_value }} · {% endif %}{{ stats.total }} Besuche
-            {% if built_at %} · Stand {{ built_at }}{% endif %}
-        </div>
-    </div>
+    {% include "_header.html" %}
 
     {% if index_missing %}
     <div class="empty-state">
@@ -44,7 +34,7 @@
             {% if profile.home_city %}<div class="profile-city">{{ profile.home_city }}</div>{% endif %}
             <div class="profile-counts">
                 <span><strong>{{ profile.counts.get('checkins', 0) }}</strong> Check-ins</span>
-                <span><strong>{{ profile.counts.get('photos', 0) }}</strong> Fotos</span>
+                <a href="/photos?source=foursquare"><strong>{{ profile.counts.get('photos', 0) }}</strong> Fotos</a>
                 <span><strong>{{ profile.counts.get('tips', 0) }}</strong> Tips</span>
                 <span><strong>{{ profile.counts.get('lists', 0) }}</strong> Listen</span>
             </div>
@@ -148,6 +138,7 @@
 
     <div class="visits-list">
         {% for visit in visits %}
+        {% set visit_photos = photos_by_visit.get(visit.id, []) %}
         <article class="visit-card" data-id="{{ visit.id }}"
                  {% if visit.lat is not none and visit.lng is not none %}data-lat="{{ visit.lat }}" data-lng="{{ visit.lng }}"{% endif %}>
             <div class="visit-date">
@@ -156,13 +147,31 @@
                 <span class="year">{{ visit.year }}</span>
             </div>
             <div class="visit-body">
-                <div class="visit-title">{{ visit.place_name or 'Unbekannter Ort' }}</div>
+                <div class="visit-title">
+                    {% if visit.place_id %}<a href="/venues/{{ visit.place_id }}">{{ visit.place_name or 'Unbekannter Ort' }}</a>{% else %}{{ visit.place_name or 'Unbekannter Ort' }}{% endif %}
+                </div>
                 <div class="visit-sub">
                     {% if visit.category %}{{ visit.category }}{% endif %}
                     {% if visit.city %} · {{ visit.city }}{% endif %}
                     {% if visit.address %} · {{ visit.address }}{% endif %}
                 </div>
                 {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}
+                {% if visit_photos %}
+                <div class="visit-photos">
+                    {% for photo in visit_photos %}
+                    {% if photo.is_video %}
+                    <a class="photo-thumb-link video-thumb" href="{{ photo.url }}" data-photo="{{ photo.url }}" data-type="video" data-caption="{{ visit.place_name or 'Unbekannter Ort' }} · {{ photo.date }}">Video</a>
+                    {% else %}
+                    <a class="photo-thumb-link" href="{{ photo.url }}" data-photo="{{ photo.url }}" data-type="image" data-caption="{{ visit.place_name or 'Unbekannter Ort' }} · {{ photo.date }}">
+                        <img class="photo-thumb" src="{{ photo.thumb_url }}" alt="" loading="lazy">
+                    </a>
+                    {% endif %}
+                    {% endfor %}
+                    {% if visit.photo_count > visit_photos|length %}
+                    <a class="photo-more" href="/venues/{{ visit.place_id }}">+{{ visit.photo_count - visit_photos|length }}</a>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
             <div class="visit-meta">
                 <span class="badge source-{{ visit.source }}">{{ visit.source }}</span>
@@ -194,5 +203,6 @@
 <script id="visits-data" type="application/json">{{ map_points|tojson }}</script>
 <script src="/static/vendor/leaflet/leaflet.js"></script>
 <script src="/static/app.js"></script>
+{% include "_lightbox.html" %}
 </body>
 </html>

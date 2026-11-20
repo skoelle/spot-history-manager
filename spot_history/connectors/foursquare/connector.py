@@ -80,7 +80,20 @@ class FoursquareConnector(BaseConnector):
                 verbose=config.verbose,
             )
             if is_probe:
-                self.probe(api, db)
+                places = None
+                if config.service_api_key:
+                    from .places_api import PlacesAPI
+
+                    places = PlacesAPI(
+                        service_key=config.service_api_key,
+                        base_url=config.places_base_url,
+                        api_version=config.places_api_version,
+                        timeout=config.timeout,
+                        sleep=0.0,
+                        retries=1,
+                        verbose=config.verbose,
+                    )
+                self.probe(api, db, places)
                 return 0
             sync = Sync(api, db, config)
             if args.command == "backfill":
@@ -100,8 +113,9 @@ class FoursquareConnector(BaseConnector):
                 return code
         return "ERR"
 
-    def probe(self, api, db) -> None:
+    def probe(self, api, db, places=None) -> None:
         from .api import ApiError, AuthError
+        from .places_api import PlacesApiError
 
         print("API-Probe (nur lesend):", flush=True)
         endpoints = [
@@ -122,10 +136,14 @@ class FoursquareConnector(BaseConnector):
             "users/self/herenow",
         ]
         row = db.conn.execute(
-            "SELECT venue_id FROM checkins WHERE venue_id IS NOT NULL LIMIT 1"
+            "SELECT venue_id, lat, lng FROM checkins "
+            "WHERE venue_id IS NOT NULL AND lat IS NOT NULL AND lng IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
-        if row:
-            endpoints.append(f"venues/{row['venue_id']}")
+        venue_id = row["venue_id"] if row else None
+        ll = f"{row['lat']},{row['lng']}" if row else "48.1372,11.5756"
+        if venue_id:
+            endpoints.append(f"venues/{venue_id}")
         for path in endpoints:
             params = {} if path == "users/self" else {"limit": "1"}
             if path.startswith("venues/"):
@@ -138,8 +156,51 @@ class FoursquareConnector(BaseConnector):
             except Exception:
                 status = "ERR"
             print(f"  {path:<32} {status}", flush=True)
+
+        if places is None:
+            print(
+                "\nPlaces API: übersprungen (FOURSQUARE_SERVICE_API_KEY fehlt)",
+                flush=True,
+            )
+            return
+
+        print("\nPlaces API (nur lesend):", flush=True)
+        checks: list[tuple[str, str, dict]] = []
+        if venue_id:
+            checks.extend(
+                [
+                    ("places/{id} (Baseline)", f"places/{venue_id}", {}),
+                    (
+                        "places/{id} (Credits)",
+                        f"places/{venue_id}",
+                        {"fields": "hours,photos,tips,rating,price"},
+                    ),
+                    ("places/{id}/photos", f"places/{venue_id}/photos", {"limit": "1"}),
+                    ("places/{id}/tips", f"places/{venue_id}/tips", {"limit": "1"}),
+                ]
+            )
+        checks.extend(
+            [
+                (
+                    "places/search",
+                    "places/search",
+                    {"ll": ll, "radius": "500", "limit": "1"},
+                ),
+                ("autocomplete", "autocomplete", {"query": "Cafe", "ll": ll, "limit": "1"}),
+            ]
+        )
+        for label, path, params in checks:
+            try:
+                places.get(path, params)
+                status = "OK"
+            except PlacesApiError as exc:
+                status = self._probe_status(exc)
+            except Exception:
+                status = "ERR"
+            print(f"  {label:<32} {status}", flush=True)
         print(
-            "Hinweis: Places API wird bewusst nicht geprüft.",
+            "Hinweis: Nur Baseline-Details sind ohne Credits verfügbar; "
+            "Foto-, Tipp- und Premium-Felder liefern 429.",
             flush=True,
         )
 

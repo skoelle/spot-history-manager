@@ -8,17 +8,10 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{% set active_page = 'venues' %}
+{% set header_meta %}<a href="/venues">Zurück zur Ortsliste</a>{% endset %}
 <div class="container">
-    <div class="header">
-        <h1>
-            <a href="/">
-                <img src="/static/favicon.svg" alt="">
-                Check-ins
-            </a>
-            <a class="nav-link" href="/venues">Orte</a>
-        </h1>
-        <div class="meta"><a href="/venues">Zurück zur Ortsliste</a></div>
-    </div>
+    {% include "_header.html" %}
 
     <div class="venue-detail box">
         <div class="venue-detail-head">
@@ -45,6 +38,17 @@
             {% endif %}
         </div>
     </div>
+
+    {% if photos %}
+    <div class="box photo-box">
+        <div class="box-title">Fotos · {{ photos|length }}</div>
+        <div class="photo-grid">
+            {% for photo in photos %}
+            {% include "_photo_card.html" %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 
     <div class="list-header">
         <span class="box-title">Besuche</span>
@@ -86,5 +90,6 @@
         {% if next_url %}<a class="button" href="{{ next_url }}">Weiter</a>{% endif %}
     </div>
 </div>
+{% include "_lightbox.html" %}
 </body>
 </html>

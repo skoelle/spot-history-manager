@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Fotos – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set active_page = 'photos' %}
+{% set header_meta %}{{ total }} Fotos{% if built_at %} · Stand {{ built_at }}{% endif %}{% endset %}
+<div class="container">
+    {% include "_header.html" %}
+
+    {% if index_missing %}
+    <div class="empty-state">
+        Der Index fehlt unter <code>{{ index_path }}</code>.<br>
+        Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
+    </div>
+    {% else %}
+    <form class="filters box" method="get" action="/photos">
+        <label class="field">
+            <span>Stadt</span>
+            <select name="city">
+                <option value="">Alle Städte</option>
+                {% for option in options.cities %}
+                <option value="{{ option.value }}" {% if option.value == query.city %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Jahr</span>
+            <select name="year">
+                <option value="">Alle Jahre</option>
+                {% for option in options.years %}
+                <option value="{{ option.value }}" {% if option.value == query.year %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Quelle</span>
+            <select name="source">
+                <option value="">Alle Quellen</option>
+                {% for option in options.sources %}
+                <option value="{{ option.value }}" {% if option.value == query.source %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field field-search">
+            <span>Suche</span>
+            <input type="search" name="q" value="{{ query.q }}" placeholder="Ort, Kategorie, Adresse, Stadt ...">
+        </label>
+        <div class="filter-actions">
+            <button type="submit">Suchen</button>
+            <a class="reset-link" href="/photos">Zurücksetzen</a>
+        </div>
+    </form>
+
+    <div class="list-header">
+        <span class="box-title">Fotos</span>
+        <span class="muted">{{ total }} Treffer · Seite {{ page }} von {{ pages }}</span>
+    </div>
+
+    {% if photos %}
+    <div class="photo-grid">
+        {% for photo in photos %}
+        {% include "_photo_card.html" %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">Keine Fotos für diese Filter.</div>
+    {% endif %}
+
+    <div class="pagination">
+        {% if prev_url %}<a class="button" href="{{ prev_url }}">Zurück</a>{% endif %}
+        <span class="muted">Seite {{ page }} von {{ pages }}</span>
+        {% if next_url %}<a class="button" href="{{ next_url }}">Weiter</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% include "_lightbox.html" %}
+</body>
+</html>

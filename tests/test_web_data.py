@@ -3,9 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 
-from spot_history.connectors.base import BaseConnector, Visit
+from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.core.config import build_paths
 from spot_history.core.index import build_index
+from spot_history.core.media import thumb_relpath
 from spot_history.web import data as web_data
 
 
@@ -38,6 +39,10 @@ class FakeConnector(BaseConnector):
             city="München",
             country_code="DE",
             note="Biergarten",
+            photos=[
+                Photo(source_photo_id="ph1", local_path="data/fake/photos/ph1.jpg"),
+                Photo(source_photo_id="vid1", local_path="data/fake/media/video/vid1.mp4"),
+            ],
         )
         yield Visit(
             source="fake",
@@ -127,11 +132,36 @@ class WebDataTest(unittest.TestCase):
         points = web_data.query_map_points(self.conn, filters)
         self.assertEqual(len(points), 2)
         self.assertTrue(all(p["lat"] is not None for p in points))
+        self.assertTrue(all(p["place_id"] is not None for p in points))
+        self.assertTrue(any(p["photo_count"] for p in points))
         page_one = web_data.query_visits(self.conn, filters, limit=2, offset=0)
         page_two = web_data.query_visits(self.conn, filters, limit=2, offset=2)
         self.assertEqual(len(page_one), 2)
         self.assertEqual(len(page_two), 1)
         self.assertEqual(len({v["id"] for v in page_one + page_two}), 3)
+
+    def test_photos(self):
+        self.assertEqual(web_data.count_photos(self.conn, web_data.PhotoFilters()), 2)
+        photos = web_data.query_photos(
+            self.conn, web_data.PhotoFilters(), limit=10, offset=0
+        )
+        self.assertEqual(len(photos), 2)
+        self.assertTrue(any(photo["is_video"] for photo in photos))
+        self.assertTrue(all(photo["place_name"] == "Michaeligarten" for photo in photos))
+        grouped = web_data.photos_for_visits(self.conn, [photos[0]["visit_id"]])
+        self.assertEqual(len(grouped[photos[0]["visit_id"]]), 2)
+
+        venue = web_data.query_venues(
+            self.conn, web_data.VenueFilters(q="Michaeligarten"), limit=10, offset=0
+        )[0]
+        self.assertEqual(len(web_data.photos_for_place(self.conn, venue["id"])), 2)
+
+    def test_thumb_relpath_is_stable(self):
+        first = thumb_relpath("foursquare", "abc")
+        self.assertEqual(first, thumb_relpath("foursquare", "abc"))
+        self.assertNotEqual(first, thumb_relpath("foursquare", "abd"))
+        self.assertTrue(first.startswith("data/foursquare/thumbs/"))
+        self.assertTrue(first.endswith(".jpg"))
 
 
 if __name__ == "__main__":
