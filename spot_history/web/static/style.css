@@ -872,3 +872,41 @@ button:hover,
 .button.danger:hover {
     background: #8a2424;
 }
+
+.venue-map-box {
+    margin-bottom: 1.5rem;
+}
+
+.map-link {
+    float: right;
+    font-size: 0.82rem;
+    font-weight: 400;
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.map-link:hover {
+    text-decoration: underline;
+}
+
+.venue-map {
+    height: 280px;
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 0;
+}
+
+.venue-map-small {
+    height: 180px;
+    margin-top: 0.5rem;
+}
+
+.osm-candidate-block {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.osm-candidate-block .osm-candidate {
+    border-bottom: none;
+    padding: 0.25rem 0;
+}

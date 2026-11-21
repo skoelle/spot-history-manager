@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..connectors import discover
+from ..connectors.osm import db as osm_db
 from ..core import identity
 from ..core.config import build_paths
 from ..core.index import build_index
@@ -413,6 +414,36 @@ def venue_detail(
         for candidate in identity.load_osm_candidates(paths.place_identity_db)
         if (candidate["source"], candidate["source_place_id"]) in member_keys
     ]
+    osm_path = paths.connector_dir("osm") / "osm.db"
+    candidate_keys = {
+        (candidate["osm_type"], int(candidate["osm_id"]))
+        for candidate in osm_candidates
+    }
+    candidate_locations = osm_db.poi_locations(osm_path, candidate_keys)
+    for candidate in osm_candidates:
+        location = candidate_locations.get(
+            (candidate["osm_type"], int(candidate["osm_id"]))
+        )
+        candidate["lat"] = location["lat"] if location else None
+        candidate["lng"] = location["lng"] if location else None
+    venue_map = None
+    if venue["lat"] is not None and venue["lng"] is not None:
+        venue_map = {
+            "lat": venue["lat"],
+            "lng": venue["lng"],
+            "label": venue["name"] or "Ort",
+            "osm_url": None,
+        }
+    if venue["osm_type"] and venue["osm_id"] is not None:
+        key = (venue["osm_type"], int(venue["osm_id"]))
+        location = osm_db.poi_locations(osm_path, {key}).get(key)
+        if location:
+            venue_map = {
+                "lat": location["lat"],
+                "lng": location["lng"],
+                "label": venue["name"] or location["name"] or "Ort",
+                "osm_url": venue["osm_url"],
+            }
     return templates.TemplateResponse(
         request,
         "venue.html",
@@ -433,6 +464,7 @@ def venue_detail(
             "profile": profile,
             "members": members,
             "osm_candidates": osm_candidates,
+            "venue_map": venue_map,
             "assign_error": assign_error,
             "assign_ok": assign_ok,
         },

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from spot_history.connectors.base import BaseConnector, Visit
@@ -119,6 +120,18 @@ class ParserTest(unittest.TestCase):
         }
         pois = parse_overpass_elements(payload)
         self.assertEqual({(p.osm_type, p.osm_id) for p in pois}, {("node", 1), ("way", 2)})
+
+    def test_poi_locations_by_osm_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "osm" / "osm.db"
+            conn = osm_db.open_db(path)
+            try:
+                osm_db.save_pois(conn, [poi(osm_id=123)])
+            finally:
+                conn.close()
+            locations = osm_db.poi_locations(path, {("way", 123), ("way", 999)})
+            self.assertEqual(set(locations), {("way", 123)})
+            self.assertAlmostEqual(locations[("way", 123)]["lat"], 48.1001)
 
     def test_parse_nominatim_results(self):
         payload = [

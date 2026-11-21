@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <title>{{ venue.name or 'Ort' }} – Spot History</title>
+    <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -78,6 +79,23 @@
         {% endif %}
     </div>
 
+    {% if venue_map %}
+    <div class="box venue-map-box">
+        <div class="box-title">
+            Karte
+            {% if venue.osm_url %}
+            <a class="map-link" href="{{ venue.osm_url }}" target="_blank" rel="noopener">
+                {{ venue.osm_type }}/{{ venue.osm_id }} auf OpenStreetMap
+            </a>
+            {% endif %}
+        </div>
+        <div class="venue-map"
+             data-map-lat="{{ venue_map.lat }}"
+             data-map-lng="{{ venue_map.lng }}"
+             data-map-label="{{ venue_map.label }}"></div>
+    </div>
+    {% endif %}
+
     {% if assign_error %}
     <div class="notice notice-error">{{ assign_error }}</div>
     {% endif %}
@@ -104,20 +122,29 @@
         <div class="osm-candidates">
             <div class="osm-candidates-title">Vorschläge</div>
             {% for candidate in osm_candidates %}
-            <form class="osm-candidate" method="post" action="/venues/{{ venue.key }}/osm">
-                <input type="hidden" name="osm" value="{{ candidate.osm_type }}/{{ candidate.osm_id }}">
-                <span class="osm-candidate-name">
-                    <strong>{{ candidate.osm_name or 'Unbekannt' }}</strong>
-                    ·
-                    <a href="https://www.openstreetmap.org/{{ candidate.osm_type }}/{{ candidate.osm_id }}"
-                       target="_blank" rel="noopener">{{ candidate.osm_type }}/{{ candidate.osm_id }}</a>
-                </span>
-                <span class="muted">
-                    {% if candidate.score is not none %}Score {{ "%.2f"|format(candidate.score) }}{% endif %}
-                    {% if candidate.distance_m is not none %} · {{ "%.0f"|format(candidate.distance_m) }} m{% endif %}
-                </span>
-                <button type="submit">Übernehmen</button>
-            </form>
+            <div class="osm-candidate-block">
+                <form class="osm-candidate" method="post" action="/venues/{{ venue.key }}/osm">
+                    <input type="hidden" name="osm" value="{{ candidate.osm_type }}/{{ candidate.osm_id }}">
+                    <span class="osm-candidate-name">
+                        <strong>{{ candidate.osm_name or 'Unbekannt' }}</strong>
+                        ·
+                        <a href="https://www.openstreetmap.org/{{ candidate.osm_type }}/{{ candidate.osm_id }}"
+                           target="_blank" rel="noopener">{{ candidate.osm_type }}/{{ candidate.osm_id }}</a>
+                    </span>
+                    <span class="muted">
+                        {% if candidate.score is not none %}Score {{ "%.2f"|format(candidate.score) }}{% endif %}
+                        {% if candidate.distance_m is not none %} · {{ "%.0f"|format(candidate.distance_m) }} m{% endif %}
+                    </span>
+                    <button type="submit">Übernehmen</button>
+                </form>
+                {% if candidate.lat is not none and candidate.lng is not none %}
+                <div class="venue-map venue-map-small"
+                     data-map-lat="{{ candidate.lat }}"
+                     data-map-lng="{{ candidate.lng }}"
+                     data-map-label="{{ candidate.osm_name or candidate.osm_type ~ '/' ~ candidate.osm_id }}"
+                     data-map-zoom="16"></div>
+                {% endif %}
+            </div>
             {% endfor %}
         </div>
         {% endif %}
@@ -189,5 +216,7 @@
     </div>
 </div>
 {% include "_lightbox.html" %}
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/venue_map.js"></script>
 </body>
 </html>

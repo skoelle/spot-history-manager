@@ -189,6 +189,33 @@ def pois_near(
     return result
 
 
+def poi_locations(
+    path: Path, keys: set[tuple[str, int]] | list[tuple[str, int]]
+) -> dict[tuple[str, int], dict]:
+    if not keys or not path.exists():
+        return {}
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    result: dict[tuple[str, int], dict] = {}
+    try:
+        for osm_type, osm_id in keys:
+            row = conn.execute(
+                "SELECT osm_type, osm_id, name, lat, lng FROM pois "
+                "WHERE osm_type = ? AND osm_id = ?",
+                (osm_type, int(osm_id)),
+            ).fetchone()
+            if not row or row["lat"] is None or row["lng"] is None:
+                continue
+            result[(row["osm_type"], int(row["osm_id"]))] = {
+                "name": row["name"],
+                "lat": row["lat"],
+                "lng": row["lng"],
+            }
+    finally:
+        conn.close()
+    return result
+
+
 def has_query(conn: sqlite3.Connection, query_key: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM query_cache WHERE query_key = ?", (query_key,)
