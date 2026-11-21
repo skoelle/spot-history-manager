@@ -82,7 +82,11 @@ class FakeConnector(BaseConnector):
             "kind": "account",
             "source_place_id": None,
             "created_at": None,
-            "payload": {"Vorname": "Test"},
+            "payload": {
+                "Vorname": "Test",
+                "Nachname": "User",
+                "Geburtstag": "01.01.1990",
+            },
         }
         yield {
             "source": "fake",
@@ -107,6 +111,21 @@ class FakeConnector(BaseConnector):
                 "media_type": "biz_photo",
                 "filename": "orphan.jpg",
                 "local_path": "data/fake/media/orphan.jpg",
+                "caption": None,
+                "status": "Angezeigt",
+            },
+        }
+        yield {
+            "source": "fake",
+            "record_id": "rec6",
+            "kind": "unlinked_photo",
+            "source_place_id": None,
+            "created_at": 1530000000,
+            "payload": {
+                "place_name": None,
+                "media_type": "profile_photo",
+                "filename": "profile.jpg",
+                "local_path": "data/fake/media/profile.jpg",
                 "caption": None,
                 "status": "Angezeigt",
             },
@@ -534,7 +553,10 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(labels["account"], "Konto")
         self.assertEqual(labels["message"], "Nachrichten")
         account = next(group for group in groups if group["kind"] == "account")
-        self.assertEqual(account["records"][0]["payload"], {"Vorname": "Test"})
+        self.assertEqual(
+            account["records"][0]["payload"],
+            {"Vorname": "Test", "Nachname": "User", "Geburtstag": "01.01.1990"},
+        )
         message = next(group for group in groups if group["kind"] == "message")
         self.assertEqual(message["records"][0]["payload"]["text"], "Servus")
         self.assertEqual(labels["unlinked_comment"], "Kommentare ohne Check-in")
@@ -554,6 +576,29 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(photo["records"][0]["place_name"], "Ohne Check-in")
         self.assertFalse(photo["records"][0]["is_video"])
         self.assertEqual(web_data.load_activity(self.conn, source="unknown"), [])
+
+    def test_split_activity_moves_profile_photo_and_account(self):
+        activity = web_data.split_activity(
+            web_data.load_activity(self.conn, source="fake")
+        )
+        self.assertEqual(
+            activity["account"][0]["payload"],
+            {"Vorname": "Test", "Nachname": "User", "Geburtstag": "01.01.1990"},
+        )
+        self.assertEqual(activity["profile_name"], "Test User")
+        self.assertEqual(activity["profile_facts"], [("Geburtstag", "01.01.1990")])
+        self.assertIsNotNone(activity["profile_photo"])
+        self.assertEqual(activity["profile_photo"]["id"], "rec6")
+        self.assertEqual(
+            activity["profile_photo"]["url"], "/media/data/fake/media/profile.jpg"
+        )
+        self.assertEqual(activity["profile_photo"]["place_name"], "Yelp-Profilfoto")
+        kinds = [group["kind"] for group in activity["groups"]]
+        self.assertNotIn("account", kinds)
+        photo = next(
+            group for group in activity["groups"] if group["kind"] == "unlinked_photo"
+        )
+        self.assertEqual([record["id"] for record in photo["records"]], ["rec5"])
 
     def test_merged_venue_aggregates_records_from_members(self):
         with tempfile.TemporaryDirectory() as tmp:

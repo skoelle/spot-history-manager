@@ -753,6 +753,45 @@ def records_for_links(
     return grouped
 
 
+def split_activity(groups: list[dict]) -> dict:
+    account: list[dict] = []
+    profile_photo: dict | None = None
+    remaining: list[dict] = []
+    for group in groups:
+        if group["kind"] == "account":
+            account = group["records"]
+            continue
+        if group["kind"] == "unlinked_photo":
+            kept = []
+            for record in group["records"]:
+                is_profile_photo = (
+                    record["payload"].get("media_type") == "profile_photo"
+                )
+                if is_profile_photo and profile_photo is None:
+                    profile_photo = record
+                else:
+                    kept.append(record)
+            if not kept:
+                continue
+            group = {**group, "records": kept}
+        remaining.append(group)
+
+    payload: dict = {}
+    for record in account:
+        payload.update(record.get("payload") or {})
+    first_name = str(payload.pop("Vorname", "") or "").strip()
+    last_name = str(payload.pop("Nachname", "") or "").strip()
+    profile_name = " ".join(part for part in (first_name, last_name) if part) or None
+
+    return {
+        "account": account,
+        "profile_name": profile_name,
+        "profile_facts": list(payload.items()),
+        "profile_photo": profile_photo,
+        "groups": remaining,
+    }
+
+
 def load_activity(conn: sqlite3.Connection, source: str = "yelp") -> list[dict]:
     kinds = tuple(kind for kind, _ in ACTIVITY_ORDER)
     params: list = [source, *kinds]

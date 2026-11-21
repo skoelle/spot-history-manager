@@ -127,8 +127,10 @@ werden als echte Visits behandelt: Sie erscheinen in der Check-in-Liste, der
 Venue-Historie, den Zählern und – bei vorhandenen Ortskoordinaten – als
 abgeleitete Kartenpunkte, jeweils mit Badge „Kommentar“. Kommentare zu einem
 vorhandenen Check-in erscheinen als Kommentarzeilen am jeweiligen Visit.
-Die Seite `/aktivitaet` bündelt zusätzlich Komplimente, Nachrichten,
-Milestones, Forumsbeiträge, Review-/Foto-Feedback und Interaktionen.
+Die Seite `/aktivitaet` zeigt oben die Kontodaten und das Yelp-Profilfoto als
+flachen Profilblock (Profilfoto nicht mehr unter „Fotos ohne Check-in“) und
+bündelt darunter Komplimente, Nachrichten, Milestones, Forumsbeiträge,
+Review-/Foto-Feedback und Interaktionen.
 Foto-Feedback verlinkt auf die Yelp-Fotoseite, da im Export kein lokales Bild
 dazu existiert.
 Sensible Felder (E-Mail, Telefon, IP-Adressen, Logins, gemeldete Inhalte)

@@ -982,14 +982,50 @@ button:hover,
     color: var(--muted, #6b7280);
 }
 
-.record-facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-
 .activity-group {
     margin-bottom: 1.5rem;
+}
+
+.activity-profile {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+}
+
+.activity-profile .profile-avatar {
+    width: 88px;
+    height: 88px;
+    font-size: 1.6rem;
+}
+
+.activity-profile .profile-body {
+    flex: 1 1 260px;
+}
+
+.activity-profile .profile-avatar a {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.profile-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.5rem;
+    margin-top: 0.4rem;
+}
+
+.profile-facts div {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.profile-facts dt {
+    color: var(--muted);
+}
+
+.profile-facts dd {
+    margin: 0;
 }
 
 .activity-summary {

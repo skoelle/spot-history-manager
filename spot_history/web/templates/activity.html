@@ -24,8 +24,34 @@
         Logins und gemeldete Inhalte werden bewusst nicht angezeigt.
     </p>
 
+    {% if profile_name or profile_facts or profile_photo %}
+    <div class="profile-card box activity-profile">
+        {% if profile_photo %}
+        <div class="profile-avatar">
+            <a class="photo-media-link" href="{{ profile_photo.url }}"
+               data-photo="{{ profile_photo.url }}" data-type="image"
+               data-caption="Yelp-Profilfoto">
+                <img src="{{ profile_photo.thumb_url }}" alt="Yelp-Profilfoto" loading="lazy">
+            </a>
+        </div>
+        {% endif %}
+        {% if profile_name or profile_facts %}
+        <div class="profile-body">
+            {% if profile_name %}<div class="profile-name">{{ profile_name }}</div>{% endif %}
+            {% if profile_facts %}
+            <dl class="profile-facts">
+                {% for key, value in profile_facts %}
+                <div><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
+                {% endfor %}
+            </dl>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% for group in groups %}
-    <details class="box activity-group"{% if loop.first %} open{% endif %}>
+    <details class="box activity-group">
         <summary class="box-title activity-summary">
             <span>{{ group.label }}</span>
             <span class="activity-count">{{ group.records|length }}</span>
@@ -41,13 +67,7 @@
         <ul class="record-list">
             {% for item in group.records %}
             <li class="record-item">
-                {% if group.kind == 'account' %}
-                <div class="record-facts">
-                    {% for key, value in item.payload.items() %}
-                    <span><strong>{{ key }}:</strong> {{ value }}</span>
-                    {% endfor %}
-                </div>
-                {% elif group.kind == 'compliment' %}
+                {% if group.kind == 'compliment' %}
                 <div class="record-main">
                     {% if item.payload.direction == 'sent' %}Gesendet{% else %}Erhalten{% endif %}
                     · {{ item.payload.name or 'Unbekannt' }}

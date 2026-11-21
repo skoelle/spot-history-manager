@@ -569,6 +569,9 @@ def activity(request: Request) -> HTMLResponse:
                 "index_missing": True,
                 "index_path": str(index_db),
                 "groups": [],
+                "profile_name": None,
+                "profile_facts": [],
+                "profile_photo": None,
                 "profile": None,
             },
         )
@@ -580,6 +583,7 @@ def activity(request: Request) -> HTMLResponse:
             profiles[0] if profiles else None,
         )
         groups = web_data.load_activity(conn)
+        activity = web_data.split_activity(groups)
     finally:
         conn.close()
     return templates.TemplateResponse(
@@ -589,7 +593,10 @@ def activity(request: Request) -> HTMLResponse:
             "request": request,
             "index_missing": False,
             "index_path": str(index_db),
-            "groups": groups,
+            "groups": activity["groups"],
+            "profile_name": activity["profile_name"],
+            "profile_facts": activity["profile_facts"],
+            "profile_photo": activity["profile_photo"],
             "profile": profile,
         },
     )
