@@ -419,6 +419,54 @@ class FoursquareActivityConnector(BaseConnector):
         )
 
 
+class GoogleActivityConnector(BaseConnector):
+    name = "google"
+    kind = "import"
+
+    def iter_records(self):
+        yield {
+            "source": "google",
+            "record_id": "review-1",
+            "kind": "review",
+            "source_place_id": "g-v1",
+            "created_at": 1700000000,
+            "payload": {
+                "name": "Alldent Zahnzentrum Einstein",
+                "address": "Einsteinstraße 130, 81675 München",
+                "country_code": "DE",
+                "url": "https://maps.google.com/?cid=1",
+                "rating": 5.0,
+                "comment": "Sehr freundlich.",
+            },
+        }
+        yield {
+            "source": "google",
+            "record_id": "saved-1",
+            "kind": "saved_place",
+            "source_place_id": None,
+            "created_at": 1600000000,
+            "payload": {
+                "name": "Sultanahmet",
+                "address": "Fatih/İstanbul, Türkei",
+                "country_code": "TR",
+                "url": "https://maps.google.com/?cid=2",
+            },
+        }
+
+    def iter_visits(self):
+        yield Visit(
+            source="google",
+            source_visit_id="g1",
+            visited_at=1700000000,
+            lat=48.1,
+            lng=11.5,
+            place_name="Alldent Zahnzentrum Einstein",
+            source_place_id="g-v1",
+            city="München",
+            country_code="DE",
+        )
+
+
 class WebDataTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -784,6 +832,36 @@ class WebDataTest(unittest.TestCase):
         membership = venue["records"]["list_membership"][0]
         self.assertEqual(membership["payload"]["list_name"], "München")
         self.assertEqual(membership["payload"]["list_type"], "liked")
+
+    def test_google_activity_includes_unlinked_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {"google": GoogleActivityConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                groups = web_data.load_google_activity(conn)
+            finally:
+                conn.close()
+
+        self.assertEqual(
+            [group["kind"] for group in groups],
+            ["review", "saved_place"],
+        )
+        self.assertEqual(
+            [group["label"] for group in groups],
+            ["Bewertungen", "Gespeicherte Orte"],
+        )
+        review = groups[0]["records"][0]
+        self.assertEqual(review["payload"]["rating"], 5.0)
+        self.assertEqual(review["payload"]["comment"], "Sehr freundlich.")
+        self.assertTrue(review["place_key"])
+        saved = groups[1]["records"][0]
+        self.assertEqual(saved["payload"]["name"], "Sultanahmet")
+        self.assertIsNone(saved["place_key"])
 
     def test_activity_groups_records(self):
         groups = web_data.load_activity(self.conn, source="fake")

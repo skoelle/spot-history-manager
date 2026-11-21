@@ -819,6 +819,11 @@ FOURSQUARE_ACTIVITY_ORDER = (
     ("taste", "Tastes"),
 )
 
+GOOGLE_ACTIVITY_ORDER = (
+    ("review", "Bewertungen"),
+    ("saved_place", "Gespeicherte Orte"),
+)
+
 ACTIVITY_ORDER = (
     ("account", "Konto"),
     ("compliment", "Komplimente"),
@@ -1000,6 +1005,36 @@ def load_foursquare_activity(conn: sqlite3.Connection) -> list[dict]:
     return [
         {"kind": kind, "label": label, "records": grouped.get(kind, [])}
         for kind, label in FOURSQUARE_ACTIVITY_ORDER
+        if grouped.get(kind)
+    ]
+
+
+def load_google_activity(conn: sqlite3.Connection) -> list[dict]:
+    kinds = tuple(kind for kind, _ in GOOGLE_ACTIVITY_ORDER)
+    sql = (
+        "SELECT source, record_id, kind, source_place_id, created_at, payload_json "
+        "FROM source_records WHERE source = 'google' "
+        f"AND kind IN ({', '.join('?' for _ in kinds)}) "
+        "ORDER BY created_at DESC, record_id"
+    )
+    try:
+        rows = conn.execute(sql, list(kinds)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    grouped: dict[str, list[dict]] = {}
+    place_ids: list[str] = []
+    for row in rows:
+        record = _record_row(row)
+        grouped.setdefault(row["kind"], []).append(record)
+        if record.get("source_place_id"):
+            place_ids.append(record["source_place_id"])
+    place_keys = _place_keys_for_source(conn, "google", place_ids)
+    for records in grouped.values():
+        for record in records:
+            record["place_key"] = place_keys.get(record.get("source_place_id"))
+    return [
+        {"kind": kind, "label": label, "records": grouped.get(kind, [])}
+        for kind, label in GOOGLE_ACTIVITY_ORDER
         if grouped.get(kind)
     ]
 

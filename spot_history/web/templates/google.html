@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Google – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set active_page = 'google' %}
+{% set header_meta %}Google{% endset %}
+<div class="container">
+    {% include "_header.html" %}
+
+    {% if index_missing %}
+    <div class="empty-state">
+        Der Index fehlt unter <code>{{ index_path }}</code>.<br>
+        Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
+    </div>
+    {% else %}
+    <p class="hint">
+        Bewertungen und gespeicherte Orte aus dem Google-Maps-Export. Die Einträge
+        erscheinen hier auch dann, wenn sie keinem Ort zugeordnet werden konnten.
+    </p>
+
+    {% for group in groups %}
+    <div class="box activity-group">
+        <div class="box-title">{{ group.label }} · {{ group.records|length }}</div>
+        <ul class="record-list">
+            {% for item in group.records %}
+            <li class="record-item">
+                <div class="record-main">
+                    {% if item.place_key %}
+                    <a href="/venues/{{ item.place_key }}">{{ item.payload.name or 'Google-Ort' }}</a>
+                    {% elif item.payload.url %}
+                    <a href="{{ item.payload.url }}" target="_blank" rel="noopener">{{ item.payload.name or 'Google-Ort' }}</a>
+                    {% else %}
+                    {{ item.payload.name or 'Google-Ort' }}
+                    {% endif %}
+                    {% if item.payload.rating %} · {{ item.payload.rating }}/5{% endif %}
+                </div>
+                {% if item.payload.address %}<div class="record-text">{{ item.payload.address }}</div>{% endif %}
+                {% if item.payload.comment %}<div class="record-text">„{{ item.payload.comment }}“</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.country_code %}<span>{{ item.payload.country_code }}</span>{% endif %}
+                    {% if item.payload.url %}
+                    <a href="{{ item.payload.url }}" target="_blank" rel="noopener">Google Maps</a>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <div class="empty-state">Keine Google-Bewertungen oder gespeicherten Orte im Index.</div>
+    {% endfor %}
+    {% endif %}
+</div>
+</body>
+</html>

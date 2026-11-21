@@ -125,7 +125,8 @@ Quellen. Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl,
 ersten und letzten Besuch, Fotoanzahl, Fotogalerie, die Besuchshistorie und
 alle vorhandenen Quell-Links (Foursquare und/oder Yelp).
 
-Die Navigation führt zu **Check-ins**, **Orten**, **Fotos**, **Foursquare** und **Yelp**.
+Die Navigation führt zu **Check-ins**, **Orten**, **Fotos**, **Foursquare**,
+**Yelp** und **Google**.
 Die Fotoseite `/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle,
 Suche) und Pagination; Klick öffnet eine Lightbox mit dem Original.
 Check-in-Karten zeigen bis zu drei Vorschaubilder, Venue-Detailseiten eine
@@ -476,6 +477,8 @@ python3 -m spot_history google stats
 - Bewertungen und gespeicherte Orte werden als `source_records` importiert,
   auf Venue-Detailseiten angezeigt und innerhalb von 15 m als Namenshilfe
   verwendet (eine Google-Bewertung kann einen ungenauen OSM-Namen ersetzen).
+  Der Google-Tab `/google` zeigt alle Bewertungen und gespeicherten Orte,
+  unabhängig davon, ob sie einem Ort zugeordnet werden konnten.
 - Manuelle Namen: `google name <cluster_key> "Name"` (optional mit
   `--address`, `--city`, `--category`). Überschreibungen überleben jeden
   Re-Import.

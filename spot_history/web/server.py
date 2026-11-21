@@ -764,6 +764,37 @@ def foursquare_activity(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/google", response_class=HTMLResponse)
+def google_activity(request: Request) -> HTMLResponse:
+    index_db = paths.index_db
+    if not index_db.exists():
+        return templates.TemplateResponse(
+            request,
+            "google.html",
+            {
+                "request": request,
+                "index_missing": True,
+                "index_path": str(index_db),
+                "groups": [],
+            },
+        )
+    conn = web_data.connect(index_db)
+    try:
+        groups = web_data.load_google_activity(conn)
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "google.html",
+        {
+            "request": request,
+            "index_missing": False,
+            "index_path": str(index_db),
+            "groups": groups,
+        },
+    )
+
+
 @app.get("/media/{path:path}")
 def media(path: str) -> FileResponse:
     data_root = paths.data_root.resolve()
