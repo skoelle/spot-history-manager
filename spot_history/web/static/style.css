@@ -377,6 +377,11 @@ button:hover,
     color: #1a73e8;
 }
 
+.source-osm {
+    background: #e9f5ec;
+    color: #2e6b34;
+}
+
 .original-link {
     color: var(--accent);
     font-size: 0.75rem;
