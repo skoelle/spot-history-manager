@@ -30,6 +30,7 @@ class Visit:
     country_code: str | None = None
     note: str | None = None
     source_url: str | None = None
+    place_url: str | None = None
     tz_offset: int | None = None
     photos: list[Photo] = field(default_factory=list)
     extra: dict[str, Any] | None = None

@@ -38,6 +38,10 @@ class Paths:
     def map_geojson(self) -> Path:
         return self.data_root / "exports" / "visits.geojson"
 
+    @property
+    def place_rules_db(self) -> Path:
+        return self.data_root / "places" / "place_rules.db"
+
     def connector_dir(self, name: str) -> Path:
         return self.data_root / name
 

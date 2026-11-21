@@ -334,6 +334,10 @@ class FoursquareConnector(BaseConnector):
                     country_code=row["country_code"],
                     note=row["shout"],
                     source_url=row["canonical_url"],
+                    place_url=(
+                        f"https://foursquare.com/v/{row['venue_id']}"
+                        if row["venue_id"] else None
+                    ),
                     tz_offset=row["time_zone_offset"],
                     photos=photos.get(row["id"], []),
                 )

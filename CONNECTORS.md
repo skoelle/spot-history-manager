@@ -12,6 +12,8 @@ Karte zusammen. Connectoren dürfen sich gegenseitig nicht verändern.
   quellenspezifische Sonderfälle.
 - Eigene DB unter `data/<name>/<name>.db`; keine Schreibzugriffe auf andere
   Connectoren oder auf `data/index/`.
+- `data/places/place_rules.db` ist quellenübergreifend und wird nur von
+  `spot_history places ...` geschrieben, nicht von Connectoren.
 - Keine Secrets, Rohdaten oder Medien ins Git. `data/` und `.env` sind ignored.
 - Der Index wird aus den Connectoren gebaut und ist wegwerfbar. Quell-DBs sind
   die Wahrheit.
@@ -65,7 +67,8 @@ class BaseConnector:
 | `category` | nein | Kategorie/Unterkategorie |
 | `address`, `city`, `state`, `postal_code`, `country_code` | nein | Adresse |
 | `note` | nein | Kommentar/Notiz |
-| `source_url` | nein | Link zum Original |
+| `source_url` | nein | Link zum Besuch/Original |
+| `place_url` | nein | Link zur Ortsseite in der Quelle (z. B. Venue/Business) |
 | `tz_offset` | nein | Minuten Offset zu UTC |
 | `photos` | nein | Liste von `Photo` |
 | `extra` | nein | quellenspezifische Zusatzfelder (JSON) |
@@ -88,16 +91,23 @@ class BaseConnector:
 
 Ein Import darf wiederholbar sein: gleiche IDs per Upsert, keine Duplikate.
 
-## Index
+## Index und kanonische Orte
 
 `python3 -m spot_history index build`:
 
 1. ruft für jeden Connector `iter_visits()` auf,
-2. schreibt `data/index/index.db` neu,
-3. schreibt `data/exports/visits.geojson` (Punkte mit `[lng, lat]`).
+2. bildet aus `source` + `source_place_id` quellenspezifische Orte,
+3. führt Orte konservativ über normalisierten Namen, Koordinaten (≤ 50 m) oder
+   Name + eindeutige Stadt zusammen; manuelle Regeln aus
+   `data/places/place_rules.db` haben Vorrang,
+4. schreibt `data/index/index.db` neu (`canonical_places`, `place_links`,
+   `merge_candidates`, Visits mit `canonical_place_id`),
+5. schreibt `data/exports/visits.geojson` (Punkte mit `[lng, lat]`).
 
 Der Index enthält nur kanonische Felder. Rohdaten und Sonderfälle bleiben in der
-Quell-DB. Neue Connectoren brauchen keine Änderung am Index-Code.
+Quell-DB. Die Regel-DB ist persistent und gehört nicht in den wegwerfbaren
+Index. Neue Connectoren brauchen keine Änderung am Index-Code, solange sie
+stabile `source_place_id` und – wenn vorhanden – `place_url` liefern.
 
 ## Tests und Abnahme
 

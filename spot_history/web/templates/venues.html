@@ -88,7 +88,11 @@
                     <td>{{ venue.category or '—' }}</td>
                     <td class="num">{{ venue.visits_count }}</td>
                     <td>{{ venue.last_visit_label or '—' }}</td>
-                    <td><span class="badge source-{{ venue.source }}">{{ venue.source }}</span></td>
+                    <td>
+                        {% for source in venue.sources %}
+                        <span class="badge source-{{ source }}">{{ source }}</span>
+                        {% else %}—{% endfor %}
+                    </td>
                 </tr>
                 {% else %}
                 <tr><td colspan="6" class="empty-state">Keine Orte für diese Filter.</td></tr>

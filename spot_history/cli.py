@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sqlite3
 import sys
 
 from .connectors import discover
+from .core import places as place_core
 from .core.config import build_paths
 from .core.index import build_index
 from .core.thumbs import generate_thumbnails
@@ -17,8 +20,171 @@ def _run_index(args: argparse.Namespace, connectors) -> int:
     print(f"Visits:   {summary['visits']}")
     print(f"Fotos:    {summary['photos']}")
     print(f"Punkte:   {summary['features']}")
+    print(
+        f"Orte:     {summary['places']} Quell-Orte -> "
+        f"{summary['canonical_places']} kanonische Orte "
+        f"({summary['place_links']} Links, "
+        f"{summary['merge_candidates']} Vorschläge)"
+    )
     print(f"Index:    {summary['index_db']}")
     print(f"GeoJSON:  {summary['geojson']}")
+    return 0
+
+
+def _rebuild_index(args: argparse.Namespace, connectors) -> int:
+    paths = build_paths(args.data_root)
+    summary = build_index(connectors, paths)
+    print(
+        f"Kanonische Orte: {summary['canonical_places']} "
+        f"(Quell-Orte: {summary['places']}, Links: {summary['place_links']}, "
+        f"Vorschläge: {summary['merge_candidates']})"
+    )
+    return 0
+
+
+def _run_places(args: argparse.Namespace, connectors) -> int:
+    paths = build_paths(args.data_root)
+    command = args.command
+    if command == "candidates":
+        return _run_place_candidates(args, paths)
+    if command == "stats":
+        return _run_place_stats(args, paths)
+    if command == "merge":
+        try:
+            source_a, place_a = place_core.parse_place_ref(args.first)
+            source_b, place_b = place_core.parse_place_ref(args.second)
+        except ValueError as exc:
+            print(f"Fehler: {exc}", file=sys.stderr)
+            return 2
+        if (source_a, place_a) == (source_b, place_b):
+            print("Fehler: Quelle und Ziel sind identisch.", file=sys.stderr)
+            return 2
+        place_core.upsert_rule(
+            paths.place_rules_db,
+            place_core.PlaceRule(
+                source=source_a,
+                source_place_id=place_a,
+                action="merge",
+                target_source=source_b,
+                target_source_place_id=place_b,
+                note=args.note,
+            ),
+        )
+        print(f"Regel gespeichert: {args.first} -> {args.second}")
+        return 0 if args.no_build else _rebuild_index(args, connectors)
+    if command in ("unmerge", "reset"):
+        try:
+            source, source_place_id = place_core.parse_place_ref(args.place)
+        except ValueError as exc:
+            print(f"Fehler: {exc}", file=sys.stderr)
+            return 2
+        if command == "unmerge":
+            place_core.upsert_rule(
+                paths.place_rules_db,
+                place_core.PlaceRule(
+                    source=source,
+                    source_place_id=source_place_id,
+                    action="standalone",
+                    note=args.note,
+                ),
+            )
+            print(f"Auto-Merge deaktiviert: {args.place}")
+        else:
+            deleted = place_core.delete_rule(
+                paths.place_rules_db, source, source_place_id
+            )
+            print(
+                f"Regel entfernt: {args.place}"
+                if deleted
+                else f"Keine Regel vorhanden: {args.place}"
+            )
+        return 0 if args.no_build else _rebuild_index(args, connectors)
+    print(f"Unbekannter places-Befehl: {command}", file=sys.stderr)
+    return 2
+
+
+def _index_connection(path):
+    if not path.exists():
+        return None
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _run_place_candidates(args: argparse.Namespace, paths) -> int:
+    conn = _index_connection(paths.index_db)
+    if conn is None:
+        print(f"Kein Index vorhanden: {paths.index_db}", file=sys.stderr)
+        return 1
+    try:
+        clauses = []
+        params: list = []
+        if args.source:
+            clauses.append("(source_a = ? OR source_b = ?)")
+            params.extend([args.source, args.source])
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        limit = f" LIMIT {int(args.limit)}" if args.limit else ""
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT source_a, source_place_id_a, name_a, source_b, "
+                "source_place_id_b, name_b, reason, confidence, distance_m, city "
+                f"FROM merge_candidates{where} "
+                "ORDER BY confidence, name_a, name_b"
+                f"{limit}",
+                params,
+            )
+        ]
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print("Keine Merge-Vorschläge.")
+        return 0
+    for row in rows:
+        distance = (
+            f"{row['distance_m']:.0f} m" if row["distance_m"] is not None else "-"
+        )
+        city = row["city"] or "-"
+        print(
+            f"{row['source_a']}:{row['source_place_id_a']}  {row['name_a']}\n"
+            f"    <-> {row['source_b']}:{row['source_place_id_b']}  "
+            f"{row['name_b']}  [{row['reason']}, {row['confidence']}, "
+            f"{distance}, {city}]"
+        )
+    return 0
+
+
+def _run_place_stats(args: argparse.Namespace, paths) -> int:
+    conn = _index_connection(paths.index_db)
+    if conn is None:
+        print(f"Kein Index vorhanden: {paths.index_db}", file=sys.stderr)
+        return 1
+    try:
+        counts = {}
+        for table in ("places", "canonical_places", "place_links", "merge_candidates"):
+            counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        merged = conn.execute(
+            "SELECT COUNT(*) FROM canonical_places WHERE source_count > 1"
+        ).fetchone()[0]
+        linked = conn.execute(
+            "SELECT COUNT(*) FROM place_links WHERE url IS NOT NULL AND url != ''"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    rules = place_core.load_rules(paths.place_rules_db)
+    manual_merges = sum(1 for rule in rules if rule.action == "merge")
+    standalone = sum(1 for rule in rules if rule.action == "standalone")
+    print(f"Quell-Orte:        {counts['places']}")
+    print(f"Kanonische Orte:   {counts['canonical_places']}")
+    print(f"Gemergte Orte:     {merged}")
+    print(f"Quell-Links:       {counts['place_links']} ({linked} mit URL)")
+    print(f"Merge-Vorschläge:  {counts['merge_candidates']}")
+    print(f"Manuelle Merges:   {manual_merges}")
+    print(f"Standalone-Regeln: {standalone}")
+    print(f"Regel-DB:          {paths.place_rules_db}")
     return 0
 
 
@@ -93,6 +259,59 @@ def main(argv: list[str] | None = None) -> int:
     thumbs_parser.add_argument("--force", action="store_true", help="vorhandene Thumbnails neu erzeugen")
     thumbs_parser.add_argument("--limit", type=int, help="maximale Anzahl Bilder")
     thumbs_parser.set_defaults(func=_run_thumbs)
+
+    places_parser = subparsers.add_parser(
+        "places", help="kanonische Orte und Quell-Links verwalten"
+    )
+    place_commands = places_parser.add_subparsers(dest="command", required=True)
+
+    candidates_parser = place_commands.add_parser(
+        "candidates", help="vorgeschlagene, nicht automatische Merges anzeigen"
+    )
+    candidates_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    candidates_parser.add_argument("--source", help="nur Paare dieser Quelle")
+    candidates_parser.add_argument("--limit", type=int, help="maximale Anzahl")
+    candidates_parser.add_argument("--json", action="store_true")
+    candidates_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    merge_parser = place_commands.add_parser(
+        "merge", help="zwei Quell-Orte dauerhaft zusammenführen"
+    )
+    merge_parser.add_argument("first", help="source:id des ersten Orts")
+    merge_parser.add_argument("second", help="source:id des Ziel-Orts")
+    merge_parser.add_argument("--note", help="Notiz zur Entscheidung")
+    merge_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    merge_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    merge_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    unmerge_parser = place_commands.add_parser(
+        "unmerge", help="Auto-Merge für einen Quell-Ort deaktivieren"
+    )
+    unmerge_parser.add_argument("place", help="source:id des Orts")
+    unmerge_parser.add_argument("--note", help="Notiz zur Entscheidung")
+    unmerge_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    unmerge_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    unmerge_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    reset_parser = place_commands.add_parser(
+        "reset", help="manuelle Regel für einen Quell-Ort entfernen"
+    )
+    reset_parser.add_argument("place", help="source:id des Orts")
+    reset_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    reset_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    reset_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    stats_parser = place_commands.add_parser(
+        "stats", help="Zahlen zu kanonischen Orten und Regeln anzeigen"
+    )
+    stats_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    stats_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     web_parser = subparsers.add_parser("web", help="Web-Oberfläche starten")
     web_parser.add_argument("--host", default="0.0.0.0")

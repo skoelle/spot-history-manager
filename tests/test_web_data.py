@@ -65,6 +65,7 @@ class FakeConnector(BaseConnector):
             city="München",
             country_code="DE",
             note="Biergarten",
+            place_url="https://example.invalid/fake/michi",
             photos=[
                 Photo(source_photo_id="ph1", local_path="data/fake/photos/ph1.jpg"),
                 Photo(source_photo_id="vid1", local_path="data/fake/media/video/vid1.mp4"),
@@ -94,6 +95,69 @@ class FakeConnector(BaseConnector):
             city="Berlin",
             country_code="DE",
         )
+
+
+class OtherConnector(BaseConnector):
+    name = "other"
+    kind = "sync"
+
+    def iter_visits(self):
+        yield Visit(
+            source="other",
+            source_visit_id="m4",
+            visited_at=1700000300,
+            lat=48.10005,
+            lng=11.50005,
+            place_name="Michaeligarten",
+            source_place_id="p1-other",
+            category="Beer Garden",
+            city="München",
+            country_code="DE",
+            place_url="https://example.invalid/other/michi",
+        )
+
+
+class DetailsConnector(BaseConnector):
+    name = "details"
+    kind = "sync"
+
+    def iter_visits(self):
+        yield Visit(
+            source="details",
+            source_visit_id="d1",
+            visited_at=1700000000,
+            lat=48.1,
+            lng=11.5,
+            place_name="Details Ort",
+            source_place_id="dp1",
+            city="München",
+            country_code="DE",
+        )
+
+    def iter_place_details(self):
+        yield {
+            "source_place_id": "dp1",
+            "name": "Details Ort",
+            "tel": "089 123",
+            "website": "example.org",
+            "email": None,
+            "social_json": "{}",
+            "address": None,
+            "city": "München",
+            "state": None,
+            "postal_code": None,
+            "country_code": "DE",
+            "formatted_address": "Teststr. 1",
+            "lat": 48.1,
+            "lng": 11.5,
+            "categories_json": "[]",
+            "date_created": None,
+            "date_refreshed": "2026-11-20",
+            "placemaker_url": None,
+            "has_related": 0,
+            "fetched_at": None,
+            "updated_at": None,
+        }
 
 
 class WebDataTest(unittest.TestCase):
@@ -188,6 +252,75 @@ class WebDataTest(unittest.TestCase):
             self.conn, web_data.VenueFilters(q="Michaeligarten"), limit=10, offset=0
         )[0]
         self.assertEqual(len(web_data.photos_for_place(self.conn, venue["id"])), 2)
+
+    def test_venue_details_keep_empty_social_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"details": DetailsConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                venue = web_data.query_venues(
+                    conn, web_data.VenueFilters(), limit=10, offset=0
+                )[0]
+                venue = web_data.get_venue(conn, venue["id"])
+            finally:
+                conn.close()
+
+        details = venue["details"]
+        self.assertEqual(details["social"], {})
+        self.assertEqual(details["categories"], [])
+        self.assertEqual(details["tel"], "089 123")
+        self.assertEqual(details["website"], "https://example.org")
+
+    def test_merged_venue_exposes_all_sources_and_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {"fake": FakeConnector(), "other": OtherConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                venues = web_data.query_venues(
+                    conn,
+                    web_data.VenueFilters(q="Michaeligarten"),
+                    limit=10,
+                    offset=0,
+                )
+                self.assertEqual(len(venues), 1)
+                venue = venues[0]
+                self.assertEqual(venue["sources"], ["fake", "other"])
+                self.assertEqual(venue["visits_count"], 2)
+                self.assertEqual(venue["photo_count"], 2)
+                self.assertEqual(
+                    {link["source"] for link in venue["links"]}, {"fake", "other"}
+                )
+                self.assertEqual(
+                    {link["url"] for link in venue["links"]},
+                    {
+                        "https://example.invalid/fake/michi",
+                        "https://example.invalid/other/michi",
+                    },
+                )
+                self.assertEqual(
+                    web_data.count_venues(
+                        conn,
+                        web_data.VenueFilters(source="other", q="Michaeligarten"),
+                    ),
+                    1,
+                )
+                detail = web_data.get_venue(conn, venue["id"])
+                visits = web_data.query_visits(
+                    conn,
+                    web_data.Filters(place_id=venue["id"]),
+                    limit=10,
+                    offset=0,
+                )
+            finally:
+                conn.close()
+        self.assertEqual(len(detail["links"]), 2)
+        self.assertEqual({visit["source"] for visit in visits}, {"fake", "other"})
 
     def test_thumb_relpath_is_stable(self):
         first = thumb_relpath("foursquare", "abc")

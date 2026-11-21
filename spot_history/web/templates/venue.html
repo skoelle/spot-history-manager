@@ -23,7 +23,11 @@
                     {% if venue.address %} · {{ venue.address }}{% endif %}
                 </div>
             </div>
-            <span class="badge source-{{ venue.source }}">{{ venue.source }}</span>
+            <span class="venue-sources">
+                {% for source in venue.sources %}
+                <span class="badge source-{{ source }}">{{ source }}</span>
+                {% endfor %}
+            </span>
         </div>
         <div class="venue-facts">
             <span><strong>{{ venue.visits_count }}</strong> Besuche</span>
@@ -33,9 +37,11 @@
             {% if venue.lat is not none and venue.lng is not none %}
             <span>{{ "%.5f"|format(venue.lat) }}, {{ "%.5f"|format(venue.lng) }}</span>
             {% endif %}
-            {% if venue.foursquare_url %}
-            <a href="{{ venue.foursquare_url }}" target="_blank" rel="noopener">Auf Foursquare</a>
+            {% for link in venue.links %}
+            {% if link.url %}
+            <a href="{{ link.url }}" target="_blank" rel="noopener">Auf {{ link.source|capitalize }}</a>
             {% endif %}
+            {% endfor %}
         </div>
         {% set details = venue.details %}
         {% if details %}
@@ -44,7 +50,7 @@
             {% if details.tel %}<span><a href="{{ details.tel_link }}">{{ details.tel }}</a></span>{% endif %}
             {% if details.website %}<span><a href="{{ details.website }}" target="_blank" rel="noopener">Website</a></span>{% endif %}
             {% if details.email %}<span><a href="mailto:{{ details.email }}">{{ details.email }}</a></span>{% endif %}
-            {% for key, value in details.social.items() %}
+            {% for key, value in details.get('social', {}).items() %}
             {% if key == 'facebook_id' %}
             <a href="https://www.facebook.com/{{ value }}" target="_blank" rel="noopener">Facebook</a>
             {% elif key == 'instagram' %}
@@ -97,6 +103,7 @@
                 {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}
             </div>
             <div class="visit-meta">
+                <span class="badge source-{{ visit.source }}">{{ visit.source }}</span>
                 {% if visit.photo_count %}
                 <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
                 {% endif %}

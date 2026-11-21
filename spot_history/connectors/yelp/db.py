@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .ids import iso_utc
+from .ids import iso_utc, normalize_name
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS places (
     city TEXT,
     state TEXT,
     country_code TEXT,
+    place_url TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -302,7 +303,7 @@ class Database:
         columns = {
             row["name"] for row in self.conn.execute("PRAGMA table_info(places)")
         }
-        for column in ("city", "state", "country_code"):
+        for column in ("city", "state", "country_code", "place_url"):
             if column not in columns:
                 self.conn.execute(f"ALTER TABLE places ADD COLUMN {column} TEXT")
 
@@ -336,19 +337,57 @@ class Database:
             )
         return len(rows)
 
+    def _place_urls(self) -> dict[str, str]:
+        rows = self.conn.execute(
+            "SELECT place_name, place_url FROM bookmarks "
+            "WHERE place_url IS NOT NULL AND place_url != '' "
+            "UNION ALL "
+            "SELECT place_name, place_url FROM collection_items "
+            "WHERE place_url IS NOT NULL AND place_url != ''"
+        )
+        urls: dict[str, str] = {}
+        for row in rows:
+            key = normalize_name(row["place_name"])
+            if key and key not in urls:
+                urls[key] = row["place_url"]
+        return urls
+
     def rebuild_places(self) -> None:
+        urls = self._place_urls()
+        rows = self.conn.execute(
+            "SELECT c.place_key, MIN(c.place_name) AS name, AVG(c.lat) AS lat, "
+            "AVG(c.lng) AS lng, COUNT(*) AS checkin_count, "
+            "MIN(c.visited_at) AS first_visit_at, MAX(c.visited_at) AS last_visit_at, "
+            "g.city, g.state, g.country_code "
+            "FROM checkins c LEFT JOIN place_geocodes g "
+            "ON g.place_key = c.place_key AND g.status = 'ok' "
+            "GROUP BY c.place_key, g.city, g.state, g.country_code"
+        ).fetchall()
+        timestamp = iso_now()
+        payload = [
+            (
+                row["place_key"],
+                row["name"],
+                row["lat"],
+                row["lng"],
+                row["checkin_count"],
+                row["first_visit_at"],
+                row["last_visit_at"],
+                row["city"],
+                row["state"],
+                row["country_code"],
+                urls.get(normalize_name(row["name"])),
+                timestamp,
+            )
+            for row in rows
+        ]
         with self.conn:
             self.conn.execute("DELETE FROM places")
-            self.conn.execute(
+            self.conn.executemany(
                 "INSERT INTO places (place_key, name, lat, lng, checkin_count, "
-                "first_visit_at, last_visit_at, city, state, country_code, updated_at) "
-                "SELECT c.place_key, MIN(c.place_name), AVG(c.lat), AVG(c.lng), "
-                "COUNT(*), MIN(c.visited_at), MAX(c.visited_at), "
-                "g.city, g.state, g.country_code, ? "
-                "FROM checkins c LEFT JOIN place_geocodes g "
-                "ON g.place_key = c.place_key AND g.status = 'ok' "
-                "GROUP BY c.place_key, g.city, g.state, g.country_code",
-                (iso_now(),),
+                "first_visit_at, last_visit_at, city, state, country_code, "
+                "place_url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                payload,
             )
 
     def places_with_coords(self, limit: int | None = None) -> list[sqlite3.Row]:

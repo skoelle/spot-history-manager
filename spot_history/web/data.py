@@ -15,7 +15,7 @@ MAP_LIMIT = 5000
 DEFAULT_CITY = "München"
 MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
-FROM = "FROM visits v LEFT JOIN places p ON p.id = v.place_id"
+FROM = "FROM visits v LEFT JOIN canonical_places p ON p.id = v.canonical_place_id"
 
 
 @dataclass(frozen=True)
@@ -67,15 +67,17 @@ def where_clause(filters: Filters) -> tuple[str, list]:
         clauses.append("v.source = ?")
         params.append(filters.source)
     if filters.place_id is not None:
-        clauses.append("v.place_id = ?")
+        clauses.append("v.canonical_place_id = ?")
         params.append(filters.place_id)
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
             "(p.name LIKE ? OR p.category LIKE ? OR v.note LIKE ? "
-            "OR p.address LIKE ? OR p.city LIKE ?)"
+            "OR p.address LIKE ? OR p.city LIKE ? OR EXISTS ("
+            "SELECT 1 FROM place_links pl WHERE pl.canonical_id = p.id "
+            "AND pl.name LIKE ?))"
         )
-        params.extend([like, like, like, like, like])
+        params.extend([like, like, like, like, like, like])
     if not clauses:
         return "", params
     return " WHERE " + " AND ".join(clauses), params
@@ -219,7 +221,7 @@ PHOTO_SELECT = (
     "v.local_datetime, v.source_url, p.id AS place_id, p.name AS place_name, "
     "p.category, p.address, p.city "
     "FROM photos ph JOIN visits v ON v.id = ph.visit_id "
-    "LEFT JOIN places p ON p.id = v.place_id"
+    "LEFT JOIN canonical_places p ON p.id = v.canonical_place_id"
 )
 
 
@@ -236,14 +238,16 @@ def photo_where_clause(filters: PhotoFilters) -> tuple[str, list]:
         clauses.append("ph.source = ?")
         params.append(filters.source)
     if filters.place_id is not None:
-        clauses.append("v.place_id = ?")
+        clauses.append("v.canonical_place_id = ?")
         params.append(filters.place_id)
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
-            "(p.name LIKE ? OR p.category LIKE ? OR p.address LIKE ? OR p.city LIKE ?)"
+            "(p.name LIKE ? OR p.category LIKE ? OR p.address LIKE ? OR p.city LIKE ? "
+            "OR EXISTS (SELECT 1 FROM place_links pl WHERE pl.canonical_id = p.id "
+            "AND pl.name LIKE ?))"
         )
-        params.extend([like, like, like, like])
+        params.extend([like, like, like, like, like])
     if not clauses:
         return "", params
     return " WHERE " + " AND ".join(clauses), params
@@ -284,7 +288,7 @@ def count_photos(conn: sqlite3.Connection, filters: PhotoFilters) -> int:
     where, params = photo_where_clause(filters)
     sql = (
         "SELECT COUNT(*) AS n FROM photos ph JOIN visits v ON v.id = ph.visit_id "
-        f"LEFT JOIN places p ON p.id = v.place_id{where}"
+        f"LEFT JOIN canonical_places p ON p.id = v.canonical_place_id{where}"
     )
     return int(conn.execute(sql, params).fetchone()["n"] or 0)
 
@@ -389,14 +393,19 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
         clauses.append("p.category = ?")
         params.append(filters.category)
     if filters.source:
-        clauses.append("p.source = ?")
+        clauses.append(
+            "EXISTS (SELECT 1 FROM place_links pl "
+            "WHERE pl.canonical_id = p.id AND pl.source = ?)"
+        )
         params.append(filters.source)
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
-            "(p.name LIKE ? OR p.category LIKE ? OR p.address LIKE ? OR p.city LIKE ?)"
+            "(p.name LIKE ? OR p.category LIKE ? OR p.address LIKE ? "
+            "OR p.city LIKE ? OR EXISTS (SELECT 1 FROM place_links pl "
+            "WHERE pl.canonical_id = p.id AND pl.name LIKE ?))"
         )
-        params.extend([like, like, like, like])
+        params.extend([like, like, like, like, like])
     if not clauses:
         return "", params
     return " WHERE " + " AND ".join(clauses), params
@@ -404,7 +413,7 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
 
 def _place_options(conn: sqlite3.Connection, column: str, limit: int | None = None) -> list[dict]:
     sql = (
-        f"SELECT {column} AS value, COUNT(*) AS count FROM places p "
+        f"SELECT {column} AS value, COUNT(*) AS count FROM canonical_places p "
         f"WHERE {column} IS NOT NULL AND {column} != '' "
         f"GROUP BY {column} ORDER BY count DESC"
     )
@@ -414,28 +423,66 @@ def _place_options(conn: sqlite3.Connection, column: str, limit: int | None = No
 
 
 def load_venue_options(conn: sqlite3.Connection) -> dict:
+    sources = [
+        dict(row)
+        for row in conn.execute(
+            "SELECT pl.source AS value, COUNT(DISTINCT pl.canonical_id) AS count "
+            "FROM place_links pl JOIN canonical_places p ON p.id = pl.canonical_id "
+            "GROUP BY pl.source ORDER BY count DESC"
+        )
+    ]
     return {
         "cities": _place_options(conn, "p.city"),
         "categories": _place_options(conn, "p.category", limit=80),
-        "sources": _place_options(conn, "p.source"),
+        "sources": sources,
     }
 
 
 def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
     where, params = venue_where_clause(filters)
-    row = conn.execute(f"SELECT COUNT(*) AS n FROM places p{where}", params).fetchone()
+    row = conn.execute(
+        f"SELECT COUNT(*) AS n FROM canonical_places p{where}", params
+    ).fetchone()
     return int(row["n"] or 0)
 
 
 VENUE_SELECT = (
-    "SELECT p.id, p.source, p.source_place_id, p.name, p.category, p.address, "
-    "p.city, p.state, p.postal_code, p.country_code, p.lat, p.lng, "
+    "SELECT p.id, p.canonical_key, p.primary_source AS source, p.name, "
+    "p.category, p.address, p.city, p.state, p.postal_code, p.country_code, "
+    "p.lat, p.lng, p.sources_json, p.source_count, "
     "COUNT(v.id) AS visits_count, MIN(v.visited_at) AS first_visit, "
     "MAX(v.visited_at) AS last_visit, "
     "(SELECT COUNT(*) FROM photos ph JOIN visits pv ON pv.id = ph.visit_id "
-    " WHERE pv.place_id = p.id) AS photo_count "
-    "FROM places p LEFT JOIN visits v ON v.place_id = p.id"
+    " WHERE pv.canonical_place_id = p.id) AS photo_count "
+    "FROM canonical_places p LEFT JOIN visits v ON v.canonical_place_id = p.id"
 )
+
+
+def _links_for_places(
+    conn: sqlite3.Connection, place_ids: list[int]
+) -> dict[int, list[dict]]:
+    if not place_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in place_ids)
+    rows = conn.execute(
+        "SELECT canonical_id, source, source_place_id, name, url, "
+        "match_method, confidence FROM place_links "
+        f"WHERE canonical_id IN ({placeholders}) ORDER BY canonical_id, source",
+        place_ids,
+    ).fetchall()
+    result: dict[int, list[dict]] = {}
+    for row in rows:
+        result.setdefault(row["canonical_id"], []).append(
+            {
+                "source": row["source"],
+                "source_place_id": row["source_place_id"],
+                "name": row["name"],
+                "url": row["url"],
+                "match_method": row["match_method"],
+                "confidence": row["confidence"],
+            }
+        )
+    return result
 
 
 def _parse_json(value: str | None):
@@ -486,14 +533,59 @@ def _venue_details(
     }
 
 
-def _format_venue(row: sqlite3.Row, details: dict | None = None) -> dict:
+def _is_empty_detail(value) -> bool:
+    return value is None or value == "" or value == {} or value == []
+
+
+def _details_for_links(conn: sqlite3.Connection, links: list[dict]) -> dict:
+    details: dict = {}
+    for link in links:
+        current = _venue_details(conn, link["source"], link["source_place_id"])
+        for key, value in current.items():
+            replace = key not in details or (
+                _is_empty_detail(details[key]) and not _is_empty_detail(value)
+            )
+            if replace:
+                details[key] = value
+    return details
+
+
+def _format_venue(
+    row: sqlite3.Row,
+    links: list[dict] | None = None,
+    details: dict | None = None,
+) -> dict:
     first_visit = row["first_visit"]
     last_visit = row["last_visit"]
     source = row["source"]
+    links = links or []
+    sources = sorted({link["source"] for link in links})
+    if not sources and source:
+        sources = [source]
+    source_place_id = next(
+        (
+            link["source_place_id"]
+            for link in links
+            if link["source"] == source and link["source_place_id"]
+        ),
+        links[0]["source_place_id"] if links else None,
+    )
+    foursquare_url = None
+    for link in links:
+        if link["source"] != "foursquare":
+            continue
+        if link["url"]:
+            foursquare_url = link["url"]
+        elif link["source_place_id"]:
+            foursquare_url = f"https://foursquare.com/v/{link['source_place_id']}"
+        break
     return {
         "id": row["id"],
+        "canonical_key": row["canonical_key"],
         "source": source,
-        "source_place_id": row["source_place_id"],
+        "sources": sources,
+        "links": links,
+        "source_place_id": source_place_id,
         "name": row["name"],
         "category": row["category"],
         "address": row["address"],
@@ -505,6 +597,7 @@ def _format_venue(row: sqlite3.Row, details: dict | None = None) -> dict:
         "lng": row["lng"],
         "visits_count": int(row["visits_count"] or 0),
         "photo_count": int(row["photo_count"] or 0),
+        "source_count": int(row["source_count"] or len(links)),
         "first_visit": first_visit,
         "last_visit": last_visit,
         "first_visit_label": (
@@ -515,10 +608,7 @@ def _format_venue(row: sqlite3.Row, details: dict | None = None) -> dict:
             datetime.fromtimestamp(int(last_visit), timezone.utc).strftime("%d.%m.%Y")
             if last_visit else None
         ),
-        "foursquare_url": (
-            f"https://foursquare.com/v/{row['source_place_id']}"
-            if source == "foursquare" and row["source_place_id"] else None
-        ),
+        "foursquare_url": foursquare_url,
         "details": details or {},
     }
 
@@ -532,7 +622,8 @@ def query_venues(
         "ORDER BY last_visit DESC, p.name LIMIT ? OFFSET ?"
     )
     rows = conn.execute(sql, [*params, limit, offset]).fetchall()
-    return [_format_venue(row) for row in rows]
+    links = _links_for_places(conn, [row["id"] for row in rows])
+    return [_format_venue(row, links.get(row["id"], [])) for row in rows]
 
 
 def get_venue(conn: sqlite3.Connection, place_id: int) -> dict | None:
@@ -541,8 +632,9 @@ def get_venue(conn: sqlite3.Connection, place_id: int) -> dict | None:
     ).fetchone()
     if not row:
         return None
-    details = _venue_details(conn, row["source"], row["source_place_id"])
-    return _format_venue(row, details)
+    venue_links = _links_for_places(conn, [place_id]).get(place_id, [])
+    details = _details_for_links(conn, venue_links)
+    return _format_venue(row, venue_links, details)
 
 
 def build_time(conn: sqlite3.Connection) -> str | None:

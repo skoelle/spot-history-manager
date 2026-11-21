@@ -4,8 +4,13 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .config import Paths
 from ..connectors.base import BaseConnector
+from .config import Paths
+from .places import (
+    collect_source_places,
+    load_rules,
+    resolve_canonical_places,
+)
 
 
 def iso_utc(timestamp: int) -> str:
@@ -20,7 +25,7 @@ def iso_local(timestamp: int, offset_minutes: int | None) -> str | None:
     return local.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def feature_for_row(row, photos: list[str]) -> dict:
+def feature_for_row(row, photos: list[str], sources: list[str] | None = None) -> dict:
     return {
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [row["lng"], row["lat"]]},
@@ -40,6 +45,7 @@ def feature_for_row(row, photos: list[str]) -> dict:
             "url": row["source_url"],
             "has_coords": bool(row["has_coords"]),
             "coords_derived": bool(row["coords_derived"]),
+            "sources": sources or [row["source"]],
             "photos": photos,
             "photo_count": len(photos),
         },
@@ -116,11 +122,58 @@ CREATE TABLE place_details (
     PRIMARY KEY(source, source_place_id)
 );
 
+CREATE TABLE canonical_places (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_key TEXT NOT NULL UNIQUE,
+    name TEXT,
+    lat REAL,
+    lng REAL,
+    category TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    country_code TEXT,
+    primary_source TEXT,
+    sources_json TEXT NOT NULL DEFAULT '[]',
+    source_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE place_links (
+    canonical_id INTEGER NOT NULL REFERENCES canonical_places(id),
+    source TEXT NOT NULL,
+    source_place_id TEXT NOT NULL,
+    name TEXT,
+    url TEXT,
+    match_method TEXT,
+    confidence TEXT,
+    PRIMARY KEY(source, source_place_id)
+);
+
+CREATE INDEX idx_place_links_canonical ON place_links(canonical_id);
+CREATE INDEX idx_place_links_source ON place_links(source);
+
+CREATE TABLE merge_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_a TEXT NOT NULL,
+    source_place_id_a TEXT NOT NULL,
+    name_a TEXT,
+    source_b TEXT NOT NULL,
+    source_place_id_b TEXT NOT NULL,
+    name_b TEXT,
+    reason TEXT,
+    confidence TEXT,
+    distance_m REAL,
+    city TEXT,
+    UNIQUE(source_a, source_place_id_a, source_b, source_place_id_b)
+);
+
 CREATE TABLE visits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
     source_visit_id TEXT NOT NULL,
     place_id INTEGER REFERENCES places(id),
+    canonical_place_id INTEGER REFERENCES canonical_places(id),
     visited_at INTEGER NOT NULL,
     visited_at_utc TEXT NOT NULL,
     local_datetime TEXT,
@@ -136,6 +189,7 @@ CREATE TABLE visits (
 CREATE INDEX idx_visits_visited_at ON visits(visited_at);
 CREATE INDEX idx_visits_source ON visits(source);
 CREATE INDEX idx_visits_place ON visits(place_id);
+CREATE INDEX idx_visits_canonical_place ON visits(canonical_place_id);
 
 CREATE TABLE photos (
     source TEXT NOT NULL,
@@ -170,6 +224,7 @@ def build_index(
     total_visits = total_photos = feature_count = 0
     place_details_total = 0
     loaded_sources: list[str] = []
+    source_visits: dict[str, list] = {}
     source_counts: dict[str, int] = {}
     features: list[dict] = []
     try:
@@ -273,79 +328,172 @@ def build_index(
                 log(f"Index: {name}: keine Daten, übersprungen")
                 continue
             loaded_sources.append(name)
-            for visit in visits:
-                place_id = None
-                if visit.source_place_id:
-                    conn.execute(
-                        "INSERT INTO places (source, source_place_id, name, lat, lng, "
-                        "category, address, city, state, postal_code, country_code) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                        "ON CONFLICT(source, source_place_id) DO UPDATE SET "
-                        "name=excluded.name, lat=excluded.lat, lng=excluded.lng, "
-                        "category=excluded.category, address=excluded.address, "
-                        "city=excluded.city, state=excluded.state, "
-                        "postal_code=excluded.postal_code, "
-                        "country_code=excluded.country_code",
-                        (
-                            visit.source, visit.source_place_id, visit.place_name,
-                            visit.lat, visit.lng, visit.category, visit.address,
-                            visit.city, visit.state, visit.postal_code,
-                            visit.country_code,
-                        ),
-                    )
-                    row = conn.execute(
-                        "SELECT id FROM places WHERE source=? AND source_place_id=?",
-                        (visit.source, visit.source_place_id),
-                    ).fetchone()
-                    place_id = row[0]
-                extra = json.dumps(visit.extra, ensure_ascii=False) if visit.extra else None
-                has_coords = visit.lat is not None and visit.lng is not None
+            source_visits[name] = visits
+
+        all_visits = []
+        for name in loaded_sources:
+            all_visits.extend(source_visits[name])
+
+        source_places = collect_source_places(all_visits)
+        rules = load_rules(paths.place_rules_db)
+        canonical_places, candidates = resolve_canonical_places(
+            source_places.values(), rules, log=log
+        )
+
+        source_place_ids: dict[tuple[str, str], int] = {}
+        for place in sorted(
+            source_places.values(), key=lambda item: (item.source, item.source_place_id)
+        ):
+            conn.execute(
+                "INSERT INTO places (source, source_place_id, name, lat, lng, "
+                "category, address, city, state, postal_code, country_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, source_place_id) DO UPDATE SET "
+                "name=excluded.name, lat=excluded.lat, lng=excluded.lng, "
+                "category=excluded.category, address=excluded.address, "
+                "city=excluded.city, state=excluded.state, "
+                "postal_code=excluded.postal_code, "
+                "country_code=excluded.country_code",
+                (
+                    place.source, place.source_place_id, place.name,
+                    place.lat, place.lng, place.category, place.address,
+                    place.city, place.state, place.postal_code,
+                    place.country_code,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id FROM places WHERE source=? AND source_place_id=?",
+                (place.source, place.source_place_id),
+            ).fetchone()
+            source_place_ids[place.key] = row[0]
+
+        confidence_for_method = {
+            "manual": "manual",
+            "name_coords": "high",
+            "name_city": "medium",
+            "single": "high",
+        }
+        canonical_ids: dict[tuple[str, str], int] = {}
+        link_total = 0
+        for canonical in canonical_places:
+            lat, lng = canonical.coords
+            cursor = conn.execute(
+                "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
+                "category, address, city, state, postal_code, country_code, "
+                "primary_source, sources_json, source_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    canonical.canonical_key,
+                    canonical.name,
+                    lat,
+                    lng,
+                    canonical.category,
+                    canonical.address,
+                    canonical.city,
+                    canonical.state,
+                    canonical.postal_code,
+                    canonical.country_code,
+                    canonical.primary_source,
+                    json.dumps(canonical.sources, ensure_ascii=False),
+                    len(canonical.members),
+                ),
+            )
+            canonical_id = int(cursor.lastrowid)
+            for member in canonical.members:
+                method = canonical.methods.get(member.key, "single")
                 conn.execute(
-                    "INSERT INTO visits (source, source_visit_id, place_id, visited_at, "
-                    "visited_at_utc, local_datetime, tz_offset, note, source_url, extra_json, "
-                    "has_coords, coords_derived) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
-                    "ON CONFLICT(source, source_visit_id) DO UPDATE SET "
-                    "place_id=excluded.place_id, visited_at=excluded.visited_at, "
-                    "visited_at_utc=excluded.visited_at_utc, "
-                    "local_datetime=excluded.local_datetime, tz_offset=excluded.tz_offset, "
-                    "note=excluded.note, source_url=excluded.source_url, "
-                    "extra_json=excluded.extra_json, has_coords=excluded.has_coords, "
-                    "coords_derived=excluded.coords_derived",
+                    "INSERT INTO place_links (canonical_id, source, source_place_id, "
+                    "name, url, match_method, confidence) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        visit.source, visit.source_visit_id, place_id, visit.visited_at,
-                        iso_utc(visit.visited_at),
-                        iso_local(visit.visited_at, visit.tz_offset),
-                        visit.tz_offset, visit.note, visit.source_url, extra,
-                        1 if has_coords else 0,
+                        canonical_id,
+                        member.source,
+                        member.source_place_id,
+                        member.name,
+                        member.place_url,
+                        method,
+                        confidence_for_method.get(method, "medium"),
                     ),
                 )
-                row = conn.execute(
-                    "SELECT id FROM visits WHERE source=? AND source_visit_id=?",
-                    (visit.source, visit.source_visit_id),
-                ).fetchone()
-                visit_id = row[0]
-                for photo in visit.photos:
-                    if not photo.source_photo_id:
-                        continue
-                    conn.execute(
-                        "INSERT INTO photos (source, source_photo_id, visit_id, "
-                        "local_path, url, taken_at) VALUES (?, ?, ?, ?, ?, ?) "
-                        "ON CONFLICT(source, source_photo_id) DO UPDATE SET "
-                        "visit_id=excluded.visit_id, local_path=excluded.local_path, "
-                        "url=excluded.url, taken_at=excluded.taken_at",
-                        (
-                            visit.source, photo.source_photo_id, visit_id,
-                            photo.local_path, photo.url, photo.taken_at,
-                        ),
-                    )
-                    total_photos += 1
-                total_visits += 1
-                source_counts[visit.source] = source_counts.get(visit.source, 0) + 1
+                canonical_ids[member.key] = canonical_id
+                link_total += 1
+
+        for candidate in candidates:
+            first, second = candidate.ordered_pair
+            conn.execute(
+                "INSERT OR IGNORE INTO merge_candidates (source_a, source_place_id_a, "
+                "name_a, source_b, source_place_id_b, name_b, reason, confidence, "
+                "distance_m, city) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    first.source,
+                    first.source_place_id,
+                    first.name,
+                    second.source,
+                    second.source_place_id,
+                    second.name,
+                    candidate.reason,
+                    candidate.confidence,
+                    candidate.distance_m,
+                    candidate.city,
+                ),
+            )
+
+        for visit in all_visits:
+            key = (visit.source, visit.source_place_id) if visit.source_place_id else None
+            place_id = source_place_ids.get(key) if key else None
+            canonical_id = canonical_ids.get(key) if key else None
+            extra = json.dumps(visit.extra, ensure_ascii=False) if visit.extra else None
+            has_coords = visit.lat is not None and visit.lng is not None
+            conn.execute(
+                "INSERT INTO visits (source, source_visit_id, place_id, "
+                "canonical_place_id, visited_at, visited_at_utc, local_datetime, "
+                "tz_offset, note, source_url, extra_json, has_coords, coords_derived) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
+                "ON CONFLICT(source, source_visit_id) DO UPDATE SET "
+                "place_id=excluded.place_id, "
+                "canonical_place_id=excluded.canonical_place_id, "
+                "visited_at=excluded.visited_at, "
+                "visited_at_utc=excluded.visited_at_utc, "
+                "local_datetime=excluded.local_datetime, tz_offset=excluded.tz_offset, "
+                "note=excluded.note, source_url=excluded.source_url, "
+                "extra_json=excluded.extra_json, has_coords=excluded.has_coords, "
+                "coords_derived=excluded.coords_derived",
+                (
+                    visit.source, visit.source_visit_id, place_id, canonical_id,
+                    visit.visited_at,
+                    iso_utc(visit.visited_at),
+                    iso_local(visit.visited_at, visit.tz_offset),
+                    visit.tz_offset, visit.note, visit.source_url, extra,
+                    1 if has_coords else 0,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id FROM visits WHERE source=? AND source_visit_id=?",
+                (visit.source, visit.source_visit_id),
+            ).fetchone()
+            visit_id = row[0]
+            for photo in visit.photos:
+                if not photo.source_photo_id:
+                    continue
+                conn.execute(
+                    "INSERT INTO photos (source, source_photo_id, visit_id, "
+                    "local_path, url, taken_at) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(source, source_photo_id) DO UPDATE SET "
+                    "visit_id=excluded.visit_id, local_path=excluded.local_path, "
+                    "url=excluded.url, taken_at=excluded.taken_at",
+                    (
+                        visit.source, photo.source_photo_id, visit_id,
+                        photo.local_path, photo.url, photo.taken_at,
+                    ),
+                )
+                total_photos += 1
+            total_visits += 1
+            source_counts[visit.source] = source_counts.get(visit.source, 0) + 1
+
         conn.execute(
             "UPDATE visits SET coords_derived = CASE "
-            "WHEN has_coords = 0 AND place_id IS NOT NULL AND EXISTS ("
-            "SELECT 1 FROM places p WHERE p.id = visits.place_id "
+            "WHEN has_coords = 0 AND canonical_place_id IS NOT NULL AND EXISTS ("
+            "SELECT 1 FROM canonical_places p WHERE p.id = visits.canonical_place_id "
             "AND p.lat IS NOT NULL AND p.lng IS NOT NULL) "
             "THEN 1 ELSE 0 END"
         )
@@ -359,13 +507,18 @@ def build_index(
         for visit_row in conn.execute(
             "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
             "v.note, v.source_url, v.has_coords, v.coords_derived, "
-            "p.source_place_id AS place_id, p.name AS place_name, p.lat, p.lng, "
-            "p.category, p.address, p.city, p.state, p.country_code "
-            "FROM visits v JOIN places p ON p.id = v.place_id "
+            "p.id AS place_id, p.name AS place_name, p.lat, p.lng, "
+            "p.category, p.address, p.city, p.state, p.country_code, p.sources_json "
+            "FROM visits v JOIN canonical_places p ON p.id = v.canonical_place_id "
             "WHERE p.lat IS NOT NULL AND p.lng IS NOT NULL "
             "ORDER BY v.visited_at"
         ):
-            features.append(feature_for_row(visit_row, photo_paths.get(visit_row["id"], [])))
+            sources = json.loads(visit_row["sources_json"]) if visit_row["sources_json"] else None
+            features.append(
+                feature_for_row(
+                    visit_row, photo_paths.get(visit_row["id"], []), sources
+                )
+            )
         feature_count = len(features)
         indexed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.executemany(
@@ -391,12 +544,18 @@ def build_index(
         "photos": total_photos,
         "features": feature_count,
         "place_details": place_details_total,
+        "places": len(source_places),
+        "canonical_places": len(canonical_places),
+        "place_links": link_total,
+        "merge_candidates": len(candidates),
         "index_db": paths.index_db,
         "geojson": paths.map_geojson,
     }
     log(
         f"Index: {total_visits} Visits, {total_photos} Fotos, "
-        f"{feature_count} Kartenpunkte, {place_details_total} Ortsdetails "
+        f"{feature_count} Kartenpunkte, {place_details_total} Ortsdetails, "
+        f"{len(source_places)} Quell-Orte -> {len(canonical_places)} kanonische Orte "
+        f"({link_total} Links, {len(candidates)} Merge-Vorschläge) "
         f"-> {paths.index_db}"
     )
     return summary

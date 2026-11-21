@@ -45,6 +45,11 @@ python3 -m spot_history foursquare venue-import
 # Alle Quellen in den zentralen Index + GeoJSON überführen
 python3 -m spot_history index build
 
+# Kanonische Orte prüfen und manuell korrigieren
+python3 -m spot_history places stats
+python3 -m spot_history places candidates
+python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
+
 # Thumbnails für die Web-UI (Pillow, einmalig bzw. nach neuen Fotos)
 .venv/bin/python -m spot_history index thumbs
 
@@ -71,12 +76,14 @@ data/
 │   └── thumbs/                320-px-Vorschaubilder für die Web-UI
 ├── yelp/                      yelp.db + media/ + thumbs/ (HTML-Import)
 ├── google/                    (kommt später) google.db
+├── places/place_rules.db      persistente manuelle Merge-/Unmerge-Regeln
 ├── index/index.db             zentraler, rebuildbarer Index
 └── exports/visits.geojson     Kartenpunkte aller Quellen
 ```
 
 Die Quell-DBs sind die Wahrheit. Der Index wird bei jedem `index build` neu aus
-den Connectors erzeugt und kann gefahrlos gelöscht werden.
+den Connectors und den Regeln in `data/places/place_rules.db` erzeugt und kann
+gefahrlos gelöscht werden. Nur die Regel-DB bleibt dauerhaft.
 
 ## Web-Oberfläche
 
@@ -89,9 +96,10 @@ pro Seite. Klick auf Karte und Liste ist synchronisiert.
 
 Zusätzlich gibt es eine Profilkarte mit lokal gespeichertem Avatar sowie eine
 Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{id}`.
-Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl, ersten und
-letzten Besuch, Fotoanzahl, Fotogalerie und die Besuchshistorie.
-Foursquare-Orte verlinken auf ihr Original.
+Die Ortsliste zeigt einen Eintrag pro kanonischem Ort mit Badges für alle
+Quellen. Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl,
+ersten und letzten Besuch, Fotoanzahl, Fotogalerie, die Besuchshistorie und
+alle vorhandenen Quell-Links (Foursquare und/oder Yelp).
 
 Die Navigation führt zu **Check-ins**, **Orten** und **Fotos**. Die Fotoseite
 `/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle, Suche) und
@@ -118,15 +126,69 @@ gedacht.
 
 - `sources` – welche Quellen enthalten sind
 - `source_profiles` – Anzeigename, Home City, Avatar und Zähler je Quelle
-- `places` – Orte je Quelle (`source`, `source_place_id`)
+- `places` – quellenspezifische Orte (`source`, `source_place_id`)
 - `place_details` – Kontakt, Social-Media, Kategorien und Datenstand je Ort
+- `canonical_places` – ein Ort pro realem Ort, aggregiert über Quellen
+- `place_links` – Quell-Identitäten und Links je kanonischem Ort
+- `merge_candidates` – nicht automatisch angewandte Merge-Vorschläge
 - `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
+  (`place_id` = Quell-Ort, `canonical_place_id` = kanonischer Ort)
 - `photos` – Fotometadaten + lokaler Pfad
 - `index_meta` – Build-Zeitpunkt
 
 `visits.geojson` ist eine `FeatureCollection` mit einem Punkt pro Visit
-(Koordinaten als `[lng, lat]`), inklusive Quelle, Ort, Kategorie, Zeit und
-lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
+(Koordinaten als `[lng, lat]`), inklusive Quelle, Ort, Kategorie, Zeit,
+kanonischem Ort, Quellenliste und lokalen Fotopfaden. Das reicht für
+Leaflet/MapLibre mit OSM-Tiles.
+
+## Zusammengeführte Orte
+
+Der Index bildet pro realem Ort einen kanonischen Ort. Jede Quelle bleibt als
+eigener Eintrag in `place_links` erhalten, inklusive `source`, stabiler
+`source_place_id` und – falls vorhanden – Original-URL. Damit zeigt ein
+gemergter Ort z. B. den Foursquare-Venue-Link und den Yelp-Business-Link
+gleichzeitig.
+
+Automatisch gemergt wird nur konservativ:
+
+1. normalisierter Name gleich und Koordinaten höchstens 50 m auseinander
+   (genau ein Kandidat), oder
+2. normalisierter Name gleich, keine Yelp-Koordinaten und genau ein
+   Foursquare-Ort mit derselben Stadt.
+
+Alles andere landet in `merge_candidates` und wird nicht automatisch
+zusammengeführt, z. B. gleicher Name mit mehreren Kandidaten oder gleicher Name
+in derselben Stadt, aber mit weit auseinanderliegenden Koordinaten. Manuelle
+Entscheidungen liegen dauerhaft in
+`data/places/place_rules.db` und überleben jeden Index-Rebuild:
+
+```bash
+# Zahlen und offene Vorschläge
+python3 -m spot_history places stats
+python3 -m spot_history places candidates [--source yelp] [--json]
+
+# dauerhaft manuell zusammenführen / Auto-Merge abschalten / Regel löschen
+python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
+python3 -m spot_history places unmerge yelp:<place_key>
+python3 -m spot_history places reset yelp:<place_key>
+```
+
+`merge`, `unmerge` und `reset` bauen den Index standardmäßig sofort neu
+(`--no-build` überspringt das). Aktueller Datenstand: 1320 Quell-Orte, 1194
+kanonische Orte, 126 automatische Merges, 14 offene Vorschläge.
+
+Bekannte Grenzen:
+
+- Yelp-Orte werden intern über den normalisierten Namen gruppiert
+  (`place_key`). Gleichnamige Orte in verschiedenen Städten sind damit schon in
+  der Yelp-Quelle ein Ort.
+- Auto-Merges über Name + Stadt sind Heuristiken; `places unmerge` ist der
+  Korrekturweg.
+- Nur 16 der 284 Yelp-Orte haben im Export eine echte Business-URL (aus
+  Lesezeichen/Sammlungen, die auch einen Check-in haben). Bei den übrigen
+  bleibt der Yelp-Link leer.
+- Interne `/venues/{id}`-URLs können sich ändern, wenn sich die kanonische
+  Mitgliedschaft ändert; der Index bleibt rebuildbar.
 
 ## Foursquare-Details
 
@@ -186,6 +248,9 @@ python3 -m spot_history yelp stats
 ```
 
 - 462 Check-ins, 284 Orte, 92 mit Quellkoordinaten, 270 Medien
+- 16 Yelp-Orte haben aus Lesezeichen/Sammlungen eine Business-URL; sie wird
+  beim Import in `places.place_url` gespeichert und als Quell-Link in den Index
+  übernommen
 - 135 Yelp-Kartenpunkte: 92 mit Quellkoordinaten, 43 über den Ort abgeleitet
   (Badge „Ort abgeleitet“ in Liste und Karte)
 - 316 von 462 Visits mit Stadt: 135 über Nominatim, 181 über exakte

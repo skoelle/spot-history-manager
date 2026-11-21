@@ -180,6 +180,12 @@ class YelpConnector(BaseConnector):
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
+            place_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(places)")
+            }
+            place_url_column = (
+                "p.place_url" if "place_url" in place_columns else "NULL AS place_url"
+            )
             for row in conn.execute(
                 "SELECT id, checkin_id, created_at, local_path FROM photos "
                 "WHERE checkin_id IS NOT NULL ORDER BY created_at"
@@ -194,7 +200,7 @@ class YelpConnector(BaseConnector):
             rows = conn.execute(
                 "SELECT c.id, c.visited_at, c.tz_offset, c.place_key, c.place_name, "
                 "c.lat, c.lng, c.note, c.status, "
-                "p.city, p.state, p.country_code FROM checkins c "
+                f"p.city, p.state, p.country_code, {place_url_column} FROM checkins c "
                 "LEFT JOIN places p ON p.place_key = c.place_key "
                 "ORDER BY c.place_name, (c.lat IS NOT NULL), c.visited_at"
             )
@@ -212,6 +218,8 @@ class YelpConnector(BaseConnector):
                     state=row["state"],
                     country_code=row["country_code"],
                     note=row["note"],
+                    source_url=row["place_url"],
+                    place_url=row["place_url"],
                     tz_offset=row["tz_offset"],
                     photos=photos.get(row["id"], []),
                     extra={"status": row["status"], "has_coords": has_coords},

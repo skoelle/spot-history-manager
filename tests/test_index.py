@@ -66,6 +66,7 @@ class FakeConnector(BaseConnector):
             city="München",
             country_code="DE",
             note="hallo",
+            place_url="https://example.invalid/fake/p1",
             tz_offset=60,
             photos=[Photo(source_photo_id="ph1", local_path="data/fake/photos/ph1.jpg")],
         )
@@ -76,6 +77,26 @@ class FakeConnector(BaseConnector):
             lat=None,
             lng=None,
             place_name="Ohne Koordinaten",
+        )
+
+
+class OtherConnector(BaseConnector):
+    name = "other"
+    kind = "sync"
+
+    def iter_visits(self):
+        yield Visit(
+            source="other",
+            source_visit_id="o1",
+            visited_at=1700000200,
+            lat=48.10005,
+            lng=11.50005,
+            place_name="Testort",
+            source_place_id="op1",
+            category="Café",
+            city="München",
+            country_code="DE",
+            place_url="https://example.invalid/other/op1",
         )
 
 
@@ -137,6 +158,55 @@ class IndexTest(unittest.TestCase):
             self.assertEqual(feature["geometry"]["coordinates"], [11.5, 48.1])
             self.assertEqual(feature["properties"]["source"], "fake")
             self.assertEqual(feature["properties"]["place"], "Testort")
+
+    def test_build_merges_sources_into_canonical_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            summary = build_index(
+                {"fake": FakeConnector(), "other": OtherConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            self.assertEqual(summary["places"], 2)
+            self.assertEqual(summary["canonical_places"], 1)
+            self.assertEqual(summary["place_links"], 2)
+            self.assertEqual(summary["canonical_places"], 1)
+
+            conn = sqlite3.connect(paths.index_db)
+            conn.row_factory = sqlite3.Row
+            try:
+                canonical = conn.execute(
+                    "SELECT * FROM canonical_places"
+                ).fetchall()
+                links = conn.execute(
+                    "SELECT * FROM place_links ORDER BY source"
+                ).fetchall()
+                visit_rows = conn.execute(
+                    "SELECT source, canonical_place_id, place_id FROM visits "
+                    "WHERE source_visit_id IN ('v1', 'o1') ORDER BY source"
+                ).fetchall()
+            finally:
+                conn.close()
+
+            self.assertEqual(len(canonical), 1)
+            self.assertEqual(
+                {row["source"] for row in links}, {"fake", "other"}
+            )
+            self.assertEqual(
+                {row["url"] for row in links},
+                {
+                    "https://example.invalid/fake/p1",
+                    "https://example.invalid/other/op1",
+                },
+            )
+            self.assertEqual(visit_rows[0]["canonical_place_id"], canonical[0]["id"])
+            self.assertEqual(visit_rows[1]["canonical_place_id"], canonical[0]["id"])
+
+            payload = json.loads(Path(paths.map_geojson).read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["features"]), 2)
+            for feature in payload["features"]:
+                self.assertEqual(feature["properties"]["sources"], ["fake", "other"])
+                self.assertEqual(feature["properties"]["place_id"], canonical[0]["id"])
 
     def test_rebuild_discards_stale_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

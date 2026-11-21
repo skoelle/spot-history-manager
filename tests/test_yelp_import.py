@@ -82,6 +82,15 @@ class YelpImportTest(unittest.TestCase):
         for relative in MEDIA_FILES:
             self.assertTrue((self.config.media_dir / relative).exists())
 
+        db = Database(self.config.db_path).open()
+        try:
+            place = db.conn.execute(
+                "SELECT place_url FROM places WHERE name=?", ("Test Café",)
+            ).fetchone()
+        finally:
+            db.close()
+        self.assertEqual(place["place_url"], "https://example.invalid/test-cafe")
+
     def test_import_is_idempotent(self):
         self._import()
         first = self._stats()
@@ -137,6 +146,8 @@ class YelpImportTest(unittest.TestCase):
         cafe = next(visit for visit in visits if visit.note == "Zweiter Besuch")
         self.assertEqual(cafe.place_name, "Test Café")
         self.assertEqual(cafe.source, "yelp")
+        self.assertEqual(cafe.place_url, "https://example.invalid/test-cafe")
+        self.assertEqual(cafe.source_url, "https://example.invalid/test-cafe")
 
     def test_iter_visits_without_db_is_empty(self):
         empty = build_config(export_dir=self.export, data_dir=self.root / "empty")
