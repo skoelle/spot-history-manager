@@ -63,6 +63,9 @@
         if (visit.coords_derived) {
             parts.push('<span class="badge derived">Ort abgeleitet</span>');
         }
+        if (visit.coords_source === "osm") {
+            parts.push('<span class="badge">OSM-Position</span>');
+        }
         if (visit.place_key) {
             parts.push(`<a href="/venues/${encodeURIComponent(visit.place_key)}">Zum Ort</a>`);
         }

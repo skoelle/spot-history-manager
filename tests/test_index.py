@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from spot_history.connectors.base import BaseConnector, Photo, Visit
+from spot_history.connectors.osm import db as osm_db
 from spot_history.core.config import build_paths
 from spot_history.core.identity import upsert_osm_assignment
 from spot_history.core.index import build_index
@@ -265,6 +266,14 @@ class IndexTest(unittest.TestCase):
             upsert_osm_assignment(
                 paths.place_identity_db, "other", "op1", "way", 247857140
             )
+            osm_conn = osm_db.open_db(paths.osm_db)
+            try:
+                osm_db.save_pois(
+                    osm_conn,
+                    [osm_db.Poi("way", 247857140, "Testort", 48.2, 11.6)],
+                )
+            finally:
+                osm_conn.close()
             summary = build_index(
                 {"fake": FakeConnector(), "other": OtherConnector()},
                 paths,
@@ -287,13 +296,19 @@ class IndexTest(unittest.TestCase):
             self.assertEqual(row["match_status"], "osm")
             self.assertEqual(row["osm_type"], "way")
             self.assertEqual(row["osm_id"], 247857140)
+            self.assertEqual(row["osm_lat"], 48.2)
+            self.assertEqual(row["osm_lng"], 11.6)
             self.assertEqual(aliases["local-fake-p1"], "osm-way-247857140")
 
             payload = json.loads(Path(paths.map_geojson).read_text(encoding="utf-8"))
+            feature = payload["features"][0]
             self.assertEqual(
-                payload["features"][0]["properties"]["place_key"],
-                "osm-way-247857140",
+                feature["properties"]["place_key"], "osm-way-247857140"
             )
+            self.assertEqual(feature["geometry"]["coordinates"], [11.6, 48.2])
+            self.assertEqual(feature["properties"]["coords_source"], "osm")
+            self.assertEqual(feature["properties"]["lat"], 48.1)
+            self.assertEqual(feature["properties"]["osm_lat"], 48.2)
 
     def test_rebuild_discards_stale_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

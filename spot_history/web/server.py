@@ -432,18 +432,8 @@ def venue_detail(
             "lat": venue["lat"],
             "lng": venue["lng"],
             "label": venue["name"] or "Ort",
-            "osm_url": None,
+            "osm_url": venue["osm_url"],
         }
-    if venue["osm_type"] and venue["osm_id"] is not None:
-        key = (venue["osm_type"], int(venue["osm_id"]))
-        location = osm_db.poi_locations(osm_path, {key}).get(key)
-        if location:
-            venue_map = {
-                "lat": location["lat"],
-                "lng": location["lng"],
-                "label": venue["name"] or location["name"] or "Ort",
-                "osm_url": venue["osm_url"],
-            }
     return templates.TemplateResponse(
         request,
         "venue.html",

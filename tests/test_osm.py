@@ -23,6 +23,7 @@ from spot_history.connectors.osm.sync import sync
 from spot_history.core import identity
 from spot_history.core.config import build_paths
 from spot_history.core.index import build_index
+from spot_history.core.osm_coords import load_osm_coords
 
 
 class FakeConnector(BaseConnector):
@@ -120,6 +121,20 @@ class ParserTest(unittest.TestCase):
         }
         pois = parse_overpass_elements(payload)
         self.assertEqual({(p.osm_type, p.osm_id) for p in pois}, {("node", 1), ("way", 2)})
+
+    def test_load_osm_coords_and_missing_cache(self):
+        self.assertEqual(load_osm_coords(Path("/nonexistent/osm.db")), {})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "osm" / "osm.db"
+            conn = osm_db.open_db(path)
+            try:
+                osm_db.save_pois(conn, [poi(osm_id=123)])
+            finally:
+                conn.close()
+            coords = load_osm_coords(path)
+            self.assertEqual(set(coords), {("way", 123)})
+            self.assertAlmostEqual(coords[("way", 123)][0], 48.1001)
+            self.assertAlmostEqual(coords[("way", 123)][1], 11.5)
 
     def test_poi_locations_by_osm_id(self):
         with tempfile.TemporaryDirectory() as tmp:

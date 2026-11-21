@@ -37,7 +37,10 @@
             {% if venue.first_visit_label %}<span>Erster Besuch: {{ venue.first_visit_label }}</span>{% endif %}
             {% if venue.last_visit_label %}<span>Letzter Besuch: {{ venue.last_visit_label }}</span>{% endif %}
             {% if venue.lat is not none and venue.lng is not none %}
-            <span>{{ "%.5f"|format(venue.lat) }}, {{ "%.5f"|format(venue.lng) }}</span>
+            <span {% if venue.coords_source == 'osm' and venue.source_lat is not none %}title="Quellkoordinate: {{ '%.5f'|format(venue.source_lat) }}, {{ '%.5f'|format(venue.source_lng) }}"{% endif %}>
+                {{ "%.5f"|format(venue.lat) }}, {{ "%.5f"|format(venue.lng) }}
+                {% if venue.coords_source == 'osm' %}<span class="badge">OSM</span>{% endif %}
+            </span>
             {% endif %}
             {% if venue.osm_url %}
             <span>OSM: <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a></span>

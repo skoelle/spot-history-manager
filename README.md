@@ -150,7 +150,8 @@ gedacht.
 - `places` – quellenspezifische Orte (`source`, `source_place_id`)
 - `place_details` – Kontakt, Social-Media, Kategorien und Datenstand je Ort
 - `canonical_places` – ein Ort pro realem Ort, aggregiert über Quellen, inkl.
-  `canonical_key`, `osm_type`, `osm_id` und `match_status`
+  `canonical_key`, `osm_type`, `osm_id`, `match_status` sowie `osm_lat`/`osm_lng`
+  aus dem OSM-Cache
 - `canonical_aliases` – frühere Keys für Redirects auf den aktuellen Key
 - `place_links` – Quell-Identitäten und Links je kanonischem Ort
 - `merge_candidates` – nicht automatisch angewandte Merge-Vorschläge
@@ -261,6 +262,10 @@ python3 -m spot_history places unassign-osm foursquare:<venue_id>
   bestätigt werden.
 - `--force` ignoriert den Abfrage-Cache; `--dry-run` matcht nur und schreibt
   keine Zuordnungen.
+- Gematchte Orte übernehmen die gecachten OSM-Koordinaten in den Index
+  (`osm_lat`/`osm_lng`). Hauptkarte, Venue-Detailseite und `visits.geojson`
+  bevorzugen diese Position; fehlt sie, gelten weiter die Quellkoordinaten.
+  Die Quellkoordinaten bleiben in `lat`/`lng` erhalten.
 - OSM-Daten stehen unter ODbL; bei öffentlicher Darstellung ist
   „© OpenStreetMap contributors“ erforderlich. Nominatim ist kein
   Massen-Scraper – Cache und Rate-Limit beibehalten.

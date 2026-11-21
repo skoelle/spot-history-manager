@@ -151,6 +151,13 @@ def _format_row(row: sqlite3.Row) -> dict:
         "country_code": row["country_code"],
         "lat": row["lat"],
         "lng": row["lng"],
+        "source_lat": row["source_lat"],
+        "source_lng": row["source_lng"],
+        "coords_source": (
+            "osm"
+            if row["osm_lat"] is not None and row["osm_lng"] is not None
+            else "source"
+        ),
         "note": row["note"],
         "source_url": row["source_url"],
         "photo_count": row["photo_count"] or 0,
@@ -163,7 +170,9 @@ VISIT_SELECT = (
     "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
     "v.note, v.source_url, v.has_coords, v.coords_derived, "
     "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
-    "p.category, p.address, p.city, p.state, p.country_code, p.lat, p.lng, "
+    "p.category, p.address, p.city, p.state, p.country_code, "
+    "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
+    "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
     "(SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count "
     f"{FROM}"
 )
@@ -186,7 +195,10 @@ def query_visits(
 
 def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
     where, params = where_clause(filters)
-    condition = "p.lat IS NOT NULL AND p.lng IS NOT NULL"
+    condition = (
+        "COALESCE(p.osm_lat, p.lat) IS NOT NULL "
+        "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL"
+    )
     if where:
         where = where + " AND " + condition
     else:
@@ -198,6 +210,13 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "id": row["id"],
             "lat": row["lat"],
             "lng": row["lng"],
+            "source_lat": row["source_lat"],
+            "source_lng": row["source_lng"],
+            "coords_source": (
+                "osm"
+                if row["osm_lat"] is not None and row["osm_lng"] is not None
+                else "source"
+            ),
             "place": row["place_name"],
             "place_id": row["place_id"],
             "place_key": row["place_key"],
@@ -493,7 +512,9 @@ def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
 VENUE_SELECT = (
     "SELECT p.id, p.canonical_key, p.primary_source AS source, p.name, "
     "p.category, p.address, p.city, p.state, p.postal_code, p.country_code, "
-    "p.lat, p.lng, p.sources_json, p.source_count, p.osm_type, p.osm_id, "
+    "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
+    "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
+    "p.sources_json, p.source_count, p.osm_type, p.osm_id, "
     "p.match_status, "
     "COUNT(v.id) AS visits_count, MIN(v.visited_at) AS first_visit, "
     "MAX(v.visited_at) AS last_visit, "
@@ -737,6 +758,15 @@ def _format_venue(
         "country_code": row["country_code"],
         "lat": row["lat"],
         "lng": row["lng"],
+        "source_lat": row["source_lat"],
+        "source_lng": row["source_lng"],
+        "osm_lat": row["osm_lat"],
+        "osm_lng": row["osm_lng"],
+        "coords_source": (
+            "osm"
+            if row["osm_lat"] is not None and row["osm_lng"] is not None
+            else "source"
+        ),
         "visits_count": int(row["visits_count"] or 0),
         "photo_count": int(row["photo_count"] or 0),
         "source_count": int(row["source_count"] or len(links)),

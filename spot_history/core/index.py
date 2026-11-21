@@ -7,6 +7,7 @@ from pathlib import Path
 from ..connectors.base import BaseConnector
 from .config import Paths
 from .identity import load_aliases, load_osm_assignments, record_aliases
+from .osm_coords import load_osm_coords
 from .places import (
     collect_source_places,
     load_rules,
@@ -27,10 +28,19 @@ def iso_local(timestamp: int, offset_minutes: int | None) -> str | None:
     return local.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def effective_coords(row) -> tuple[float, float, str]:
+    osm_lat = row["osm_lat"]
+    osm_lng = row["osm_lng"]
+    if osm_lat is not None and osm_lng is not None:
+        return osm_lat, osm_lng, "osm"
+    return row["source_lat"], row["source_lng"], "source"
+
+
 def feature_for_row(row, photos: list[str], sources: list[str] | None = None) -> dict:
+    lat, lng, coords_source = effective_coords(row)
     return {
         "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [row["lng"], row["lat"]]},
+        "geometry": {"type": "Point", "coordinates": [lng, lat]},
         "properties": {
             "source": row["source"],
             "visit_id": row["source_visit_id"],
@@ -40,6 +50,11 @@ def feature_for_row(row, photos: list[str], sources: list[str] | None = None) ->
             "osm_type": row["osm_type"],
             "osm_id": row["osm_id"],
             "match_status": row["match_status"],
+            "lat": row["source_lat"],
+            "lng": row["source_lng"],
+            "osm_lat": row["osm_lat"],
+            "osm_lng": row["osm_lng"],
+            "coords_source": coords_source,
             "category": row["category"],
             "visited_at": row["visited_at"],
             "visited_at_utc": iso_utc(row["visited_at"]),
@@ -145,6 +160,8 @@ CREATE TABLE canonical_places (
     source_count INTEGER NOT NULL DEFAULT 0,
     osm_type TEXT,
     osm_id INTEGER,
+    osm_lat REAL,
+    osm_lng REAL,
     match_status TEXT NOT NULL DEFAULT 'local'
 );
 
@@ -398,6 +415,7 @@ def build_index(
         source_places = collect_source_places(all_visits)
         rules = load_rules(paths.place_rules_db)
         osm_assignments = load_osm_assignments(paths.place_identity_db)
+        osm_coords = load_osm_coords(paths.osm_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
@@ -446,12 +464,19 @@ def build_index(
         link_total = 0
         for canonical in canonical_places:
             lat, lng = canonical.coords
+            osm_lat = osm_lng = None
+            if canonical.osm_type and canonical.osm_id is not None:
+                osm_coords_for_place = osm_coords.get(
+                    (canonical.osm_type, int(canonical.osm_id))
+                )
+                if osm_coords_for_place:
+                    osm_lat, osm_lng = osm_coords_for_place
             cursor = conn.execute(
                 "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
                 "category, address, city, state, postal_code, country_code, "
                 "primary_source, sources_json, source_count, osm_type, osm_id, "
-                "match_status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "osm_lat, osm_lng, match_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
                     canonical.name,
@@ -468,6 +493,8 @@ def build_index(
                     len(canonical.members),
                     canonical.osm_type,
                     canonical.osm_id,
+                    osm_lat,
+                    osm_lng,
                     canonical.match_status,
                 ),
             )
@@ -588,7 +615,8 @@ def build_index(
             "UPDATE visits SET coords_derived = CASE "
             "WHEN has_coords = 0 AND canonical_place_id IS NOT NULL AND EXISTS ("
             "SELECT 1 FROM canonical_places p WHERE p.id = visits.canonical_place_id "
-            "AND p.lat IS NOT NULL AND p.lng IS NOT NULL) "
+            "AND COALESCE(p.osm_lat, p.lat) IS NOT NULL "
+            "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL) "
             "THEN 1 ELSE 0 END"
         )
         photo_paths: dict[int, list[str]] = {}
@@ -602,10 +630,12 @@ def build_index(
             "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
             "v.note, v.source_url, v.has_coords, v.coords_derived, "
             "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
-            "p.lat, p.lng, p.osm_type, p.osm_id, p.match_status, "
+            "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
+            "p.osm_type, p.osm_id, p.match_status, "
             "p.category, p.address, p.city, p.state, p.country_code, p.sources_json "
             "FROM visits v JOIN canonical_places p ON p.id = v.canonical_place_id "
-            "WHERE p.lat IS NOT NULL AND p.lng IS NOT NULL "
+            "WHERE COALESCE(p.osm_lat, p.lat) IS NOT NULL "
+            "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL "
             "ORDER BY v.visited_at"
         ):
             sources = json.loads(visit_row["sources_json"]) if visit_row["sources_json"] else None

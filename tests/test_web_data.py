@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from spot_history.connectors.base import BaseConnector, Photo, Visit
+from spot_history.connectors.osm import db as osm_db
 from spot_history.core.config import build_paths
 from spot_history.core.identity import upsert_osm_assignment
 from spot_history.core.index import build_index
@@ -395,6 +396,14 @@ class WebDataTest(unittest.TestCase):
             upsert_osm_assignment(
                 paths.place_identity_db, "fake", "p1", "node", 42
             )
+            osm_conn = osm_db.open_db(paths.osm_db)
+            try:
+                osm_db.save_pois(
+                    osm_conn,
+                    [osm_db.Poi("node", 42, "Michaeligarten", 48.2, 11.6)],
+                )
+            finally:
+                osm_conn.close()
             build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
             conn = web_data.connect(paths.index_db)
             try:
@@ -403,12 +412,22 @@ class WebDataTest(unittest.TestCase):
                 venues = web_data.query_venues(
                     conn, web_data.VenueFilters(match="osm"), limit=10, offset=0
                 )
+                venue = web_data.get_venue_by_key(conn, "osm-node-42")
+                points = web_data.query_map_points(conn, web_data.Filters())
             finally:
                 conn.close()
         self.assertEqual(len(venues), 1)
         self.assertEqual(venues[0]["key"], "osm-node-42")
         self.assertEqual(venues[0]["match_status"], "osm")
         self.assertEqual(venues[0]["osm_url"], "https://www.openstreetmap.org/node/42")
+        self.assertEqual(venues[0]["lat"], 48.2)
+        self.assertEqual(venues[0]["lng"], 11.6)
+        self.assertEqual(venues[0]["source_lat"], 48.1)
+        self.assertEqual(venues[0]["coords_source"], "osm")
+        self.assertEqual(venue["lat"], 48.2)
+        self.assertEqual(venue["coords_source"], "osm")
+        self.assertTrue(any(point["coords_source"] == "osm" for point in points))
+        self.assertTrue(any(point["lat"] == 48.2 for point in points))
 
     def test_venue_lookup_by_key_and_legacy(self):
         venues = web_data.query_venues(
