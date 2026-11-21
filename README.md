@@ -234,8 +234,9 @@ python3 -m spot_history places reset yelp:<place_key>
 ```
 
 `merge`, `unmerge` und `reset` bauen den Index standardmäßig sofort neu
-(`--no-build` überspringt das). Aktueller Datenstand: 1320 Quell-Orte, 1194
-kanonische Orte, 126 automatische Merges, 14 offene Vorschläge.
+(`--no-build` überspringt das). Aktueller Datenstand: 2462 Quell-Orte, 2236
+kanonische Orte, 213 gemergte Orte (davon 2 manuell) und 177 offene
+Merge-Vorschläge.
 
 Bekannte Grenzen:
 
@@ -371,12 +372,14 @@ python3 -m spot_history yelp stats
 - Das Yelp-`Datum` ist UTC; der Export enthält keinen Orts-Offset. In
   `yelp.db` bleibt `tz_offset` deshalb `NULL`. Der Index löst die Lokalzeit auf
   (gleicher Ort, Orts-Zeitzone, Stadt/Land, Umfeld-Mehrheit oder naher
-  Foursquare-Check-in); aktuell sind alle 462 Yelp-Visits aufgelöst.
-- 135 Yelp-Kartenpunkte: 92 mit Quellkoordinaten, 43 über den Ort abgeleitet
-  (Badge „Ort abgeleitet“ in Liste und Karte)
-- 316 von 462 Visits mit Stadt: 135 über Nominatim, 181 über exakte
+  Foursquare-Check-in); aktuell sind alle Yelp-Visits (482 inkl. 20
+  Kommentar-Visits) aufgelöst.
+- 306 Yelp-Kartenpunkte (alle 482 Yelp-Besuche inkl. Kommentar-Visits): 92 mit
+  Quellkoordinaten, 214 über den Ort abgeleitet (Badge „Ort abgeleitet“ in Liste
+  und Karte)
+- 316 von 462 Check-in-Visits mit Stadt: 135 über Nominatim, 181 über exakte
   Namensmatches gegen Foursquare-Index und Export-URLs
-- 146 Visits bleiben ohne Stadt, 327 ohne Kartenpunkt
+- 146 Check-in-Visits bleiben ohne Stadt, 176 Yelp-Besuche ohne Kartenpunkt
 - Der Geocoding-Cache liegt unter `data/yelp/` und ist gitignored;
   `--force` erzwingt neue Nominatim-Requests
 
