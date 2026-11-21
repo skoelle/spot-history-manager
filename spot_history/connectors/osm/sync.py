@@ -10,9 +10,11 @@ from ...core.config import Paths
 from ...core.places import looks_like_address
 from . import db as osm_db
 from .matcher import (
+    CANDIDATE_SCORE,
     IndexPlace,
     decide,
     direct_candidates,
+    distance_between,
     load_index_places,
     nearby_candidates,
     rank_matches,
@@ -52,6 +54,18 @@ class RematchSummary:
     addresses: int = 0
 
 
+@dataclass
+class NetScanSummary:
+    places: int = 0
+    pending: int = 0
+    queries: int = 0
+    cached_queries: int = 0
+    candidates: int = 0
+    none: int = 0
+    addresses: int = 0
+    errors: int = 0
+
+
 def _nominatim_query(place: IndexPlace) -> str:
     parts = [place.name]
     if place.city:
@@ -61,8 +75,21 @@ def _nominatim_query(place: IndexPlace) -> str:
     return ", ".join(parts)
 
 
+def _nominatim_fallback_query(place: IndexPlace) -> str:
+    parts = [place.name]
+    if place.city:
+        parts.append(place.city)
+    elif place.address:
+        parts.append(place.address)
+    return ", ".join(parts)
+
+
 def _nominatim_key(place: IndexPlace) -> str:
     return "nominatim:" + _nominatim_query(place).casefold()
+
+
+def _nominatim_fallback_key(place: IndexPlace) -> str:
+    return "nominatim2:" + _nominatim_fallback_query(place).casefold()
 
 
 def _query_key(place: IndexPlace, radius: int) -> str:
@@ -374,6 +401,143 @@ def rematch(
                     score=match.score,
                     reason=match.reason,
                 )
+    finally:
+        conn.close()
+    return summary
+
+
+def net_scan(
+    paths: Paths,
+    *,
+    limit: int | None = None,
+    max_distance_m: float = 2000.0,
+    force: bool = False,
+    dry_run: bool = False,
+    sleep: float = 1.1,
+    verbose: bool = False,
+    osm_db_path: Path | None = None,
+    log=print,
+) -> NetScanSummary:
+    """Search Nominatim for venues that still have no OSM ID and no candidate."""
+    summary = NetScanSummary()
+    places = load_index_places(paths.index_db)
+    summary.places = len(places)
+    assignments = identity.load_osm_assignments(paths.place_identity_db)
+    candidate_keys = identity.load_osm_candidate_keys(paths.place_identity_db)
+    pending: list[IndexPlace] = []
+    for place in places:
+        if not place.members:
+            continue
+        if place.osm_type and place.osm_id is not None:
+            continue
+        if any(member in assignments for member in place.members):
+            continue
+        if any(member in candidate_keys for member in place.members):
+            continue
+        if looks_like_address(place.name):
+            summary.addresses += 1
+            continue
+        pending.append(place)
+    if limit is not None:
+        pending = pending[: max(0, limit)]
+    summary.pending = len(pending)
+    if not pending:
+        log("OSM: kein offener Venue ohne Vorschlag für den Netzwerk-Scan.")
+        return summary
+
+    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    conn = osm_db.open_db(db_path)
+    nominatim = NominatimClient(sleep=sleep, verbose=verbose)
+    try:
+        for position, place in enumerate(pending, start=1):
+            if position % 25 == 0:
+                log(f"OSM: Netzwerk-Scan {position}/{len(pending)}")
+            key = _nominatim_key(place)
+            payload = None if force else osm_db.get_nominatim_cache(conn, key)
+            if payload is None:
+                try:
+                    payload = nominatim.search_raw(_nominatim_query(place), limit=5)
+                except NominatimError as exc:
+                    summary.errors += 1
+                    log(f"OSM: Netzwerk-Scan übersprungen für {place.name!r} ({exc})")
+                    continue
+                summary.queries += 1
+                osm_db.set_nominatim_cache(conn, key, payload)
+                osm_db.save_pois(conn, parse_nominatim_results(payload))
+            else:
+                summary.cached_queries += 1
+
+            fallback_query = _nominatim_fallback_query(place)
+            if not payload and fallback_query.casefold() != _nominatim_query(place).casefold():
+                fallback_key = _nominatim_fallback_key(place)
+                fallback = (
+                    None if force else osm_db.get_nominatim_cache(conn, fallback_key)
+                )
+                if fallback is None:
+                    try:
+                        fallback = nominatim.search_raw(fallback_query, limit=5)
+                    except NominatimError as exc:
+                        summary.errors += 1
+                        log(
+                            f"OSM: Netzwerk-Scan übersprungen für "
+                            f"{place.name!r} ({exc})"
+                        )
+                        continue
+                    summary.queries += 1
+                    osm_db.set_nominatim_cache(conn, fallback_key, fallback)
+                    osm_db.save_pois(conn, parse_nominatim_results(fallback))
+                else:
+                    summary.cached_queries += 1
+                payload = fallback
+
+            pois = parse_nominatim_results(payload)
+            if not pois:
+                summary.none += 1
+                continue
+            if place.has_coords:
+                candidates = [
+                    (poi, distance_between(place, poi)) for poi in pois
+                ]
+                matches = rank_matches(
+                    place, candidates, max_distance_m=max_distance_m
+                )
+            else:
+                matches = rank_matches(place, direct_candidates(pois))
+
+            stored = 0
+            for match in matches[:3]:
+                if match.score < CANDIDATE_SCORE:
+                    continue
+                reason = match.reason
+                if match.distance_m is not None and match.distance_m > 150:
+                    reason += "_far"
+                if verbose:
+                    log(
+                        f"OSM: Netzwerk-Kandidat {place.name!r} ~ "
+                        f"{match.poi.name!r} ({match.poi.osm_type}/"
+                        f"{match.poi.osm_id}, {match.score:.2f}, {reason})"
+                    )
+                stored += 1
+                if dry_run or not place.members:
+                    continue
+                source, source_place_id = place.members[0]
+                identity.upsert_osm_candidate(
+                    paths.place_identity_db,
+                    source,
+                    source_place_id,
+                    match.poi.osm_type,
+                    match.poi.osm_id,
+                    name=place.name,
+                    city=place.city,
+                    osm_name=match.poi.name,
+                    distance_m=match.distance_m,
+                    score=match.score,
+                    reason=reason,
+                )
+            if stored:
+                summary.candidates += stored
+            else:
+                summary.none += 1
     finally:
         conn.close()
     return summary

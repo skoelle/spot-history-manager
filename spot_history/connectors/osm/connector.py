@@ -68,6 +68,30 @@ class OsmConnector(BaseConnector):
         rematch_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
         rematch_parser.set_defaults(func=self.run)
 
+        net_parser = commands.add_parser(
+            "net-scan",
+            parents=[common],
+            help="offene Venues ohne Vorschlag über Nominatim nachschlagen",
+        )
+        net_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte")
+        net_parser.add_argument(
+            "--max-distance",
+            type=float,
+            default=2000.0,
+            help="maximale Distanz akzeptierter Nominatim-Treffer in Metern",
+        )
+        net_parser.add_argument(
+            "--force", action="store_true", help="Nominatim-Cache ignorieren"
+        )
+        net_parser.add_argument(
+            "--dry-run", action="store_true", help="nur anzeigen, nichts schreiben"
+        )
+        net_parser.add_argument(
+            "--sleep", type=float, default=1.1, help="Pause zwischen Nominatim-Anfragen"
+        )
+        net_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
+        net_parser.set_defaults(func=self.run)
+
         stats_parser = commands.add_parser(
             "stats", parents=[common], help="Cache- und Zuordnungszahlen anzeigen"
         )
@@ -84,6 +108,8 @@ class OsmConnector(BaseConnector):
             return self._sync(args, paths)
         if args.command == "rematch":
             return self._rematch(args, paths)
+        if args.command == "net-scan":
+            return self._net_scan(args, paths)
         print(f"Unbekannter osm-Befehl: {args.command}")
         return 2
 
@@ -142,6 +168,35 @@ class OsmConnector(BaseConnector):
         print(f"Adresspunkte:      {summary.addresses}")
         if args.dry_run:
             print("Dry-Run: keine Zuordnungen/Kandidaten geschrieben.")
+        print("Danach: python3 -m spot_history index build")
+        return 0
+
+    def _net_scan(self, args: argparse.Namespace, paths) -> int:
+        from .sync import net_scan
+
+        try:
+            summary = net_scan(
+                paths,
+                limit=args.limit,
+                max_distance_m=args.max_distance,
+                force=args.force,
+                dry_run=args.dry_run,
+                sleep=args.sleep,
+                verbose=args.verbose,
+                osm_db_path=self._db_path(args, paths),
+            )
+        except FileNotFoundError as exc:
+            print(f"Fehler: {exc}")
+            return 1
+        print(f"Orte gesamt:       {summary.places}")
+        print(f"Offen:             {summary.pending}")
+        print(f"Adresspunkte:      {summary.addresses}")
+        print(f"Abfragen:          {summary.queries} neu, {summary.cached_queries} aus Cache")
+        print(f"Kandidaten:        {summary.candidates}")
+        print(f"Ohne Treffer:      {summary.none}")
+        print(f"Fehler:            {summary.errors}")
+        if args.dry_run:
+            print("Dry-Run: keine Kandidaten geschrieben.")
         print("Danach: python3 -m spot_history index build")
         return 0
 

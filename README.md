@@ -303,6 +303,10 @@ python3 -m spot_history osm sync --provider nominatim
 python3 -m spot_history osm rematch --dry-run --verbose
 python3 -m spot_history osm rematch
 
+# Netzwerk-Fallback: Venues ohne OSM-ID und ohne Vorschlag über Nominatim suchen
+python3 -m spot_history osm net-scan --dry-run --verbose
+python3 -m spot_history osm net-scan --limit 50
+
 # Danach OSM-Keys in den Index übernehmen
 python3 -m spot_history index build
 
@@ -333,6 +337,11 @@ python3 -m spot_history places unassign-osm foursquare:<venue_id>
   (kein Overpass/Nominatim) und ergänzt so auch nachträglich Kandidaten aus
   dem Cache. Adress-/Straßennamen werden dabei als `place_kind = address`
   geführt und nicht als Venue gematcht.
+- `osm net-scan` sucht nur für Venues ohne OSM-ID und ohne vorhandenen
+  Kandidaten über Nominatim (Name + Stadt + Adresse). Auch weit entfernte
+  Treffer (bis `--max-distance`, Default 2000 m) werden nur als Kandidat
+  gespeichert, nie automatisch zugeordnet. Cache und Rate-Limit werden
+  eingehalten; `--force` ignoriert den Nominatim-Cache.
 - `--force` ignoriert den Abfrage-Cache; `--dry-run` matcht nur und schreibt
   keine Zuordnungen. In der Ortsliste gibt es Filter für Ortsart
   (Venue/Adresse) und „ohne OSM-Vorschlag“.

@@ -21,7 +21,7 @@ from spot_history.connectors.osm.overpass import (
     parse_nominatim_results,
     parse_overpass_elements,
 )
-from spot_history.connectors.osm.sync import rematch, sync
+from spot_history.connectors.osm.sync import net_scan, rematch, sync
 from spot_history.core import identity
 from spot_history.core.config import build_paths
 from spot_history.core.index import build_index
@@ -383,6 +383,79 @@ class SyncTest(unittest.TestCase):
             self.assertEqual(summary.pending, 0)
             self.assertEqual(summary.addresses, 1)
             fake_overpass.fetch_around.assert_not_called()
+
+    def test_net_scan_stores_candidate_without_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            payload = [
+                {
+                    "osm_type": "node",
+                    "osm_id": 456,
+                    "lat": "48.1001",
+                    "lon": "11.5001",
+                    "display_name": "Testort, München",
+                    "extratags": {},
+                    "address": {"city": "München"},
+                }
+            ]
+            fake_nominatim = mock.Mock()
+            fake_nominatim.search_raw.return_value = payload
+            with mock.patch(
+                "spot_history.connectors.osm.sync.NominatimClient",
+                return_value=fake_nominatim,
+            ):
+                summary = net_scan(paths, sleep=0.0, log=lambda _: None)
+            self.assertEqual(summary.queries, 1)
+            self.assertEqual(summary.candidates, 1)
+            self.assertEqual(identity.load_osm_assignments(paths.place_identity_db), {})
+            candidates = identity.load_osm_candidates(paths.place_identity_db)
+            self.assertEqual(candidates[0]["osm_id"], 456)
+            self.assertEqual(candidates[0]["osm_name"], "Testort")
+
+    def test_net_scan_far_result_is_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            payload = [
+                {
+                    "osm_type": "node",
+                    "osm_id": 457,
+                    "lat": "48.11",
+                    "lon": "11.5",
+                    "display_name": "Testort, München",
+                    "extratags": {},
+                    "address": {"city": "München"},
+                }
+            ]
+            fake_nominatim = mock.Mock()
+            fake_nominatim.search_raw.return_value = payload
+            with mock.patch(
+                "spot_history.connectors.osm.sync.NominatimClient",
+                return_value=fake_nominatim,
+            ):
+                summary = net_scan(paths, sleep=0.0, log=lambda _: None)
+            self.assertEqual(summary.candidates, 1)
+            candidates = identity.load_osm_candidates(paths.place_identity_db)
+            self.assertGreater(candidates[0]["distance_m"], 1000)
+            self.assertTrue(candidates[0]["reason"].endswith("_far"))
+            self.assertEqual(identity.load_osm_assignments(paths.place_identity_db), {})
+
+    def test_net_scan_skips_places_with_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            identity.upsert_osm_candidate(
+                paths.place_identity_db, "fake", "p1", "node", 9
+            )
+            fake_nominatim = mock.Mock()
+            with mock.patch(
+                "spot_history.connectors.osm.sync.NominatimClient",
+                return_value=fake_nominatim,
+            ):
+                summary = net_scan(paths, sleep=0.0, log=lambda _: None)
+            self.assertEqual(summary.pending, 0)
+            fake_nominatim.search_raw.assert_not_called()
 
     def test_rematch_uses_cached_pois_without_queries(self):
         with tempfile.TemporaryDirectory() as tmp:

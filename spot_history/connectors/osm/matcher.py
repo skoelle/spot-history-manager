@@ -27,6 +27,8 @@ class IndexPlace:
     postcode: str | None = None
     address: str | None = None
     category: str | None = None
+    osm_type: str | None = None
+    osm_id: int | None = None
     members: list[tuple[str, str]] = field(default_factory=list)
 
     @property
@@ -55,7 +57,7 @@ def load_index_places(index_db: Path) -> list[IndexPlace]:
     try:
         rows = conn.execute(
             "SELECT id, canonical_key, name, lat, lng, city, postal_code, "
-            "address, category FROM canonical_places "
+            "address, category, osm_type, osm_id FROM canonical_places "
             "WHERE name IS NOT NULL AND name != ''"
         ).fetchall()
         links = conn.execute(
@@ -80,6 +82,8 @@ def load_index_places(index_db: Path) -> list[IndexPlace]:
             postcode=row["postal_code"],
             address=row["address"],
             category=row["category"],
+            osm_type=row["osm_type"],
+            osm_id=row["osm_id"],
             members=members.get(int(row["id"]), []),
         )
         for row in rows
@@ -156,6 +160,7 @@ def score_poi(
     *,
     allow_alt: bool = True,
     allow_fuzzy: bool = True,
+    max_distance_m: float = 150.0,
 ) -> Match | None:
     if looks_like_address(place.name):
         return None
@@ -178,6 +183,8 @@ def score_poi(
             location_score = 0.1
         elif distance_m <= 150:
             location_score = 0.03
+        elif distance_m <= max_distance_m:
+            location_score = 0.0
         else:
             return None
         if _city_matches(place, poi):
@@ -216,10 +223,12 @@ def score_poi(
 def rank_matches(
     place: IndexPlace,
     candidates: list[tuple[Poi, float | None]],
+    *,
+    max_distance_m: float = 150.0,
 ) -> list[Match]:
     matches = []
     for poi, distance in candidates:
-        match = score_poi(place, poi, distance)
+        match = score_poi(place, poi, distance, max_distance_m=max_distance_m)
         if match is not None:
             matches.append(match)
     matches.sort(
