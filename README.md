@@ -4,8 +4,9 @@ Sammelt Check-in-/Besuchshistorien aus mehreren Diensten, speichert jede Quelle
 in einer eigenen SQLite-Datenbank und baut daraus einen zentralen, rebuildbaren
 Index plus GeoJSON für eine spätere OpenStreetMap-Karte.
 
-Aktuell implementiert: **Foursquare/Swarm** (API-Sync) und **Yelp** (einmaliger HTML-Import).
-Geplant: **Google Timeline** (Import).
+Aktuell implementiert: **Foursquare/Swarm** (API-Sync), **Yelp**
+(einmaliger HTML-Import) und **Google Timeline** (iPhone-/Takeout-Import mit
+kostenloser OSM-Anreicherung).
 
 ## Voraussetzungen
 
@@ -42,6 +43,12 @@ python3 -m spot_history foursquare probe
 # Places-API-Baseline einmalig aus JSON importieren (ohne API-Calls)
 python3 -m spot_history foursquare venue-import
 
+# Google Timeline exportieren, prüfen, importieren und über OSM anreichern
+python3 -m spot_history google scan     --input "$GOOGLE_TIMELINE_INBOX"
+python3 -m spot_history google import   --input "$GOOGLE_TIMELINE_INBOX"
+python3 -m spot_history google osm
+python3 -m spot_history google stats
+
 # Alle Quellen in den zentralen Index + GeoJSON überführen
 python3 -m spot_history index build
 
@@ -75,7 +82,7 @@ data/
 │   ├── photos/<checkin_id>/   Bilddateien (Standalone unter photos/_standalone/)
 │   └── thumbs/                320-px-Vorschaubilder für die Web-UI
 ├── yelp/                      yelp.db + media/ + thumbs/ (HTML-Import)
-├── google/                    (kommt später) google.db
+├── google/                    google.db (Quelle) + osm_cache.db (Enrichment-Cache)
 ├── osm/osm.db                 OSM-POI-Cache und Abfrage-Cache (Overpass/Nominatim)
 ├── places/place_rules.db      persistente manuelle Merge-/Unmerge-Regeln
 ├── places/identity.db         persistente OSM-Zuordnungen + URL-Aliase
@@ -371,6 +378,76 @@ python3 -m spot_history yelp stats
 - Der Geocoding-Cache liegt unter `data/yelp/` und ist gitignored;
   `--force` erzwingt neue Nominatim-Requests
 
+## Google-Timeline-Import
+
+Google Timeline liegt seit der Migration 2024/25 nur noch auf dem Gerät. Es gibt
+keine API und keinen Web-Export; Google Takeout enthält nur den Altbestand vor
+der Migration. Der Import ist deshalb zweistufig: manueller Export aus der
+Google-Maps-App, danach automatischer Import und OSM-Anreicherung.
+
+### Export vom iPhone
+
+1. Google Maps → Profil → Einstellungen → Standort & Datenschutz →
+   Timeline-Daten exportieren.
+2. Im iOS-Share-Sheet „In Dateien sichern“; die Datei heißt
+   `location-history.json` (oder `Timeline.json`).
+3. In einen Ordner speichern, der zu Linux synchronisiert (Dropbox, Nextcloud,
+   Google Drive + `rclone`; iCloud Drive ist nicht direkt mountbar).
+4. Auto-Delete in Timeline aus oder mindestens 36 Monate, sonst verschwinden
+   Daten vor dem nächsten Export.
+
+Den Pfad setzt man in `.env`:
+
+```env
+GOOGLE_TIMELINE_INBOX=/path/to/google-timeline
+```
+
+Der Importer erkennt Dateien am Inhalt, nicht am Namen. Unterstützt werden der
+iPhone-Array-Export, `semanticSegments` (Android/Phone), Legacy-Takeout
+(`timelineObjects`/`placeVisit`) und GeoJSON aus Bewertungen/Gespeicherten
+Orten. `Records.json` (rohe GPS-Pings) und `@eaDir` werden übersprungen.
+
+### Import und OSM-Anreicherung
+
+```bash
+python3 -m spot_history google scan
+python3 -m spot_history google import
+python3 -m spot_history google osm
+python3 -m spot_history google stats
+```
+
+- `google import` baut `data/google/google.db` bei jedem Lauf neu aus allen
+  Dateien im Inbox-Ordner auf. Doppelte Visits werden über stabile IDs
+  zusammengefasst; Google-Place-IDs mit identischen Koordinaten (≤15 m) werden
+  zu einem Ort konsolidiert.
+- `Home` und `Work` werden als „Zuhause“/„Arbeit“ geführt; Adressen dieser
+  Orte werden nicht angezeigt.
+- `google osm` nutzt zuerst den vorhandenen Cache in `data/osm/osm.db`
+  (nur lesend), danach Overpass (`nwr(around:55)[name]`) und als Fallback
+  Nominatim-Reverse. Ergebnisse landen in `data/google/osm_cache.db`.
+- Automatisch übernommen werden nur eindeutige Treffer ≤25 m. Treffer zwischen
+  25 und 50 m sowie Mehrdeutiges landen als Kandidaten in
+  `google osm-candidates`; dort lassen sie sich mit `google osm-accept`
+  übernehmen.
+- Bewertungen und gespeicherte Orte werden als `source_records` importiert,
+  auf Venue-Detailseiten angezeigt und innerhalb von 15 m als Namenshilfe
+  verwendet (eine Google-Bewertung kann einen ungenauen OSM-Namen ersetzen).
+- Manuelle Namen: `google name <cluster_key> "Name"` (optional mit
+  `--address`, `--city`, `--category`). Überschreibungen überleben jeden
+  Re-Import.
+- Es werden keine kostenpflichtigen APIs verwendet. Overpass/Nominatim werden
+  mit Cache, Batch-Größe und Pausen im Fair-Use-Rahmen genutzt; OSM-Daten
+  stehen unter ODbL („© OpenStreetMap contributors“).
+- Der Google-Maps-Link bleibt als `place_url` erhalten
+  (`...?api=1&query_place_id=...`), auch wenn kein Name gefunden wurde.
+
+Bekannte Grenzen: Google liefert nur Place-ID + Koordinaten, keine Namen. Es
+gibt keine Google-ID→OSM-ID-Abbildung; die Zuordnung läuft über Koordinaten.
+In dichten Lagen kann der nächste OSM-POI falsch sein, deshalb werden
+25–50-m-Treffer nur als Kandidaten gespeichert. Viele Orte erhalten statt eines
+Venue-Namens eine Adresse (Straße + Hausnummer). Der iPhone-Export selbst
+bleibt manuell; `google.sh` übernimmt Import, OSM-Anreicherung und Index-Rebuild.
+
 ## Weitere Quellen
 
 Der Connector-Vertrag steht in [`CONNECTORS.md`](CONNECTORS.md). Connectoren
@@ -390,4 +467,6 @@ python3 -m unittest discover -s tests
 - `.env` und `data/` sind gitignored und gehören nicht ins Repository.
 - Das Roh-JSON enthält auch Namen von Nutzern, die Check-ins geliked haben.
 - Fotos werden in Originalauflösung geladen; `--no-photos` überspringt das.
+- Der Google-Timeline-Export bleibt manuell (iOS-Share-Sheet); `google.sh`
+  übernimmt danach Import, OSM-Anreicherung und Index-Rebuild.
 - Kein Cron/Daemon: Sync und Index werden manuell aufgerufen.

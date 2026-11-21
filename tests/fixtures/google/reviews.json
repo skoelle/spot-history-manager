@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "geometry": {"coordinates": [11.5, 48.1], "type": "Point"},
+      "properties": {
+        "Google Maps URL": "https://maps.google.com/?cid=1",
+        "Location": {
+          "Address": "Teststr. 1, 80000 München, Germany",
+          "Business Name": "Test Café",
+          "Country Code": "DE",
+          "Geo Coordinates": {"Latitude": "48.1", "Longitude": "11.5"}
+        },
+        "Published": "2018-05-18T16:35:32.773Z",
+        "Star Rating": 5,
+        "Review Comment": "Sehr gut."
+      },
+      "type": "Feature"
+    }
+  ]
+}

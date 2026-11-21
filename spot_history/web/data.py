@@ -659,6 +659,8 @@ VENUE_RECORD_KINDS = (
     "survey_answer",
     "business_interaction",
     "unlinked_photo",
+    "review",
+    "saved_place",
 )
 
 ACTIVITY_ORDER = (

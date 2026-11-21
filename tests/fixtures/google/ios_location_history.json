@@ -1,0 +1,95 @@
+[
+  {
+    "startTime": "2024-04-03T08:13:57.000+02:00",
+    "endTime": "2024-04-03T20:10:18.000+02:00",
+    "visit": {
+      "hierarchyLevel": "0",
+      "probability": "0.85",
+      "topCandidate": {
+        "placeID": "ChIJioscafe",
+        "placeLocation": "geo:48.100000,11.500000",
+        "semanticType": "Unknown",
+        "probability": "0.9"
+      }
+    }
+  },
+  {
+    "startTime": "2024-04-03T08:13:57.000+02:00",
+    "endTime": "2024-04-03T20:10:18.000+02:00",
+    "visit": {
+      "hierarchyLevel": "0",
+      "probability": "0.85",
+      "topCandidate": {
+        "placeID": "ChIJioscafe",
+        "placeLocation": "geo:48.100000,11.500000",
+        "semanticType": "Unknown",
+        "probability": "0.9"
+      }
+    }
+  },
+  {
+    "startTime": "2024-04-03T12:00:00.000+02:00",
+    "endTime": "2024-04-03T13:00:00.000+02:00",
+    "activity": {
+      "start": {"latLng": "48.100000°, 11.500000°"},
+      "end": {"latLng": "48.200000°, 11.600000°"},
+      "topCandidate": {"type": "WALKING"}
+    }
+  },
+  {
+    "startTime": "2024-04-03T13:00:00.000+02:00",
+    "endTime": "2024-04-03T14:00:00.000+02:00",
+    "timelinePath": [
+      {"point": "48.100000°, 11.500000°", "time": "2024-04-03T13:00:00.000+02:00"}
+    ]
+  },
+  {
+    "startTime": "2024-04-04T09:00:00.000+02:00",
+    "endTime": "2024-04-04T18:00:00.000+02:00",
+    "visit": {
+      "topCandidate": {
+        "placeID": "ChIJiostesthome",
+        "placeLocation": "geo:48.200000,11.600000",
+        "semanticType": "Home"
+      }
+    }
+  },
+  {
+    "startTime": "2024-04-04T19:00:00.000+02:00",
+    "endTime": "2024-04-04T20:00:00.000+02:00",
+    "visit": {
+      "topCandidate": {
+        "placeID": "ChIJiostesthome2",
+        "placeLocation": "geo:48.200000,11.600000",
+        "semanticType": "Searched Address"
+      }
+    }
+  },
+  {
+    "startTime": "2024-04-05T09:00:00.000+02:00",
+    "endTime": "2024-04-05T10:00:00.000+02:00",
+    "visit": {
+      "topCandidate": {
+        "placeID": "ChIJiofallback",
+        "semanticType": "Unknown"
+      },
+      "otherCandidates": [
+        {
+          "placeID": "ChIJiofallback",
+          "placeLocation": "geo:48.300000,11.700000",
+          "semanticType": "Unknown"
+        }
+      ]
+    }
+  },
+  {
+    "startTime": "2024-04-06T09:00:00.000+02:00",
+    "endTime": "2024-04-06T10:00:00.000+02:00",
+    "visit": {
+      "topCandidate": {
+        "placeLocation": "geo:48.400000,11.800000",
+        "semanticType": "Unknown"
+      }
+    }
+  }
+]

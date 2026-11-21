@@ -1,0 +1,35 @@
+{
+  "timelineObjects": [
+    {
+      "placeVisit": {
+        "location": {
+          "latitudeE7": 481300000,
+          "longitudeE7": 115300000,
+          "placeId": "ChIJlegacy",
+          "name": "Legacy Café",
+          "address": "Legacy Street 1",
+          "semanticType": "Unknown"
+        },
+        "duration": {
+          "startTimestamp": "2024-06-01T10:00:00.000Z",
+          "endTimestamp": "2024-06-01T11:00:00.000Z"
+        }
+      }
+    },
+    {
+      "placeVisit": {
+        "location": {
+          "latitudeE7": 480000000,
+          "longitudeE7": 4179967296,
+          "placeId": "ChIJwrapped",
+          "name": "Wrapped Place",
+          "semanticType": "Unknown"
+        },
+        "duration": {
+          "startTimestamp": "2024-06-02T10:00:00.000Z",
+          "endTimestamp": "2024-06-02T11:00:00.000Z"
+        }
+      }
+    }
+  ]
+}

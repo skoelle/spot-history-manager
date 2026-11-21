@@ -153,6 +153,59 @@
     </div>
     {% endif %}
 
+    {% set google_reviews = venue.records.get('review', []) %}
+    {% set google_saved = venue.records.get('saved_place', []) %}
+    {% if google_reviews or google_saved %}
+    <div class="box">
+        <div class="box-title">Google-Details</div>
+        {% if google_reviews %}
+        <div class="detail-section">
+            <div class="detail-heading">Bewertungen · {{ google_reviews|length }}</div>
+            <ul class="record-list">
+                {% for item in google_reviews %}
+                <li class="record-item">
+                    <div class="record-main">
+                        {{ item.payload.name or 'Bewertung' }}
+                        {% if item.payload.rating %} · {{ item.payload.rating }}/5{% endif %}
+                    </div>
+                    {% if item.payload.comment %}
+                    <div class="record-text">{{ item.payload.comment }}</div>
+                    {% endif %}
+                    <div class="record-meta">
+                        {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                        {% if item.payload.url %}
+                        <a href="{{ item.payload.url }}" target="_blank" rel="noopener">Google Maps</a>
+                        {% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        {% if google_saved %}
+        <div class="detail-section">
+            <div class="detail-heading">Gespeicherte Orte · {{ google_saved|length }}</div>
+            <ul class="record-list">
+                {% for item in google_saved %}
+                <li class="record-item">
+                    <div class="record-main">{{ item.payload.name or 'Gespeicherter Ort' }}</div>
+                    {% if item.payload.address %}
+                    <div class="record-text">{{ item.payload.address }}</div>
+                    {% endif %}
+                    <div class="record-meta">
+                        {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                        {% if item.payload.url %}
+                        <a href="{{ item.payload.url }}" target="_blank" rel="noopener">Google Maps</a>
+                        {% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if assign_error %}
     <div class="notice notice-error">{{ assign_error }}</div>
     {% endif %}

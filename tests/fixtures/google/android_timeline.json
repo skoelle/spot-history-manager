@@ -1,0 +1,19 @@
+{
+  "semanticSegments": [
+    {
+      "startTime": "2024-05-01T10:00:00.000+02:00",
+      "endTime": "2024-05-01T11:00:00.000+02:00",
+      "startTimeTimezoneUtcOffsetMinutes": "120",
+      "visit": {
+        "hierarchyLevel": "0",
+        "topCandidate": {
+          "placeId": "ChIJandroid",
+          "displayName": "Android Café",
+          "semanticType": "Unknown",
+          "placeLocation": {"latLng": "48.120000°, 11.520000°"},
+          "probability": "0.7"
+        }
+      }
+    }
+  ]
+}

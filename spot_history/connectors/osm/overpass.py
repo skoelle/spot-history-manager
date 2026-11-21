@@ -14,6 +14,7 @@ DEFAULT_OVERPASS_ENDPOINTS = (
     "https://overpass.private.coffee/api/interpreter",
 )
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT = "spot-history-manager/1.0 (personal OSM enrichment)"
 
 
@@ -236,4 +237,35 @@ class NominatimClient:
         if not isinstance(payload, list):
             raise NominatimError("Nominatim lieferte kein JSON-Array")
         self._log(f"Nominatim {query!r} -> {len(payload)} Treffer")
+        return payload
+
+    def reverse_raw(self, lat: float, lng: float, zoom: int = 18) -> dict:
+        params = urllib.parse.urlencode(
+            {
+                "lat": f"{lat:.6f}",
+                "lon": f"{lng:.6f}",
+                "format": "jsonv2",
+                "zoom": zoom,
+                "addressdetails": 1,
+                "extratags": 1,
+                "namedetails": 1,
+            }
+        )
+        request = urllib.request.Request(
+            f"{NOMINATIM_REVERSE_URL}?{params}",
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = json.load(response)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise NominatimError(f"Nominatim-Reverse fehlgeschlagen: {exc}") from exc
+        finally:
+            time.sleep(self.sleep)
+        if not isinstance(payload, dict):
+            raise NominatimError("Nominatim-Reverse lieferte kein JSON-Objekt")
+        self._log(
+            f"Nominatim-Reverse {lat:.5f},{lng:.5f} -> "
+            f"{payload.get('name') or payload.get('display_name')!r}"
+        )
         return payload
