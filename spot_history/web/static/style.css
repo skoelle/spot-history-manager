@@ -710,18 +710,19 @@ button:hover,
 }
 
 .lightbox {
-    width: min(92vw, 1100px);
+    width: fit-content;
     max-width: 92vw;
+    margin: auto;
     padding: 0;
-    border: none;
+    border: 1px solid var(--border);
     border-radius: 10px;
-    background: #111;
-    color: #fff;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    background: var(--card);
+    color: var(--text);
+    box-shadow: var(--shadow-hover);
 }
 
 .lightbox::backdrop {
-    background: rgba(0, 0, 0, 0.72);
+    background: rgba(0, 0, 0, 0.55);
 }
 
 .lightbox-inner {
@@ -745,28 +746,9 @@ button:hover,
 .lightbox-caption,
 #lightbox-caption {
     padding: 0.7rem 1rem 0.9rem;
-    color: #ddd;
+    color: var(--muted);
     font-size: 0.9rem;
     text-align: center;
-}
-
-.lightbox-close {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    width: 2.2rem;
-    height: 2.2rem;
-    padding: 0;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    font-size: 1.5rem;
-    line-height: 1;
-    z-index: 1;
-}
-
-.lightbox-close:hover {
-    background: var(--accent);
 }
 
 @media (max-width: 800px) {

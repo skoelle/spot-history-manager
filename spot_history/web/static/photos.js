@@ -6,7 +6,6 @@
     const image = document.getElementById("lightbox-image");
     const video = document.getElementById("lightbox-video");
     const caption = document.getElementById("lightbox-caption");
-    const closeButton = dialog.querySelector(".lightbox-close");
 
     const close = () => {
         if (video) {
@@ -46,7 +45,6 @@
         dialog.showModal();
     });
 
-    closeButton?.addEventListener("click", close);
     dialog.addEventListener("click", (event) => {
         if (event.target === dialog) {
             close();
