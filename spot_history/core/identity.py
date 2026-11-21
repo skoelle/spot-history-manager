@@ -251,6 +251,87 @@ def delete_osm_assignment(path: Path, source: str, source_place_id: str) -> bool
         conn.close()
 
 
+def upsert_osm_candidate(
+    path: Path,
+    source: str,
+    source_place_id: str,
+    osm_type: str,
+    osm_id: int | str,
+    *,
+    name: str | None = None,
+    city: str | None = None,
+    osm_name: str | None = None,
+    distance_m: float | None = None,
+    score: float | None = None,
+    reason: str | None = None,
+) -> None:
+    clean_type, clean_id = validate_osm(osm_type, osm_id)
+    stamp = now_iso()
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO osm_candidates (source, source_place_id, name, city, "
+                "osm_type, osm_id, osm_name, distance_m, score, reason, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, source_place_id, osm_type, osm_id) DO UPDATE SET "
+                "name=excluded.name, city=excluded.city, osm_name=excluded.osm_name, "
+                "distance_m=excluded.distance_m, score=excluded.score, "
+                "reason=excluded.reason, created_at=excluded.created_at",
+                (
+                    source,
+                    source_place_id,
+                    name,
+                    city,
+                    clean_type,
+                    clean_id,
+                    osm_name,
+                    distance_m,
+                    score,
+                    reason,
+                    stamp,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+def clear_osm_candidates(path: Path, source: str, source_place_id: str) -> int:
+    if not path.exists():
+        return 0
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM osm_candidates WHERE source=? AND source_place_id=?",
+                (source, source_place_id),
+            )
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def load_osm_candidates(path: Path, limit: int | None = None) -> list[dict]:
+    conn = _read_connection(path)
+    if conn is None:
+        return []
+    try:
+        try:
+            sql = (
+                "SELECT source, source_place_id, name, city, osm_type, osm_id, "
+                "osm_name, distance_m, score, reason, created_at "
+                "FROM osm_candidates ORDER BY score DESC, name"
+            )
+            if limit:
+                sql += f" LIMIT {int(limit)}"
+            rows = conn.execute(sql).fetchall()
+        except sqlite3.OperationalError:
+            return []
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
 def record_aliases(path: Path, aliases: dict[str, str]) -> None:
     pairs = [
         (alias, target)

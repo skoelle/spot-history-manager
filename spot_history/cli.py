@@ -7,6 +7,7 @@ import sqlite3
 import sys
 
 from .connectors import discover
+from .core import identity
 from .core import places as place_core
 from .core.config import build_paths
 from .core.index import build_index
@@ -49,6 +50,16 @@ def _run_places(args: argparse.Namespace, connectors) -> int:
         return _run_place_candidates(args, paths)
     if command == "stats":
         return _run_place_stats(args, paths)
+    if command == "assign-osm":
+        return _run_assign_osm(args, paths, connectors)
+    if command == "unassign-osm":
+        return _run_unassign_osm(args, paths, connectors)
+    if command == "osm-candidates":
+        return _run_osm_candidates(args, paths)
+    if command == "osm-accept":
+        return _run_osm_accept(args, paths, connectors)
+    if command == "unmatched":
+        return _run_unmatched(args, paths)
     if command == "merge":
         try:
             source_a, place_a = place_core.parse_place_ref(args.first)
@@ -199,6 +210,151 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     return 0
 
 
+def _run_assign_osm(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+        osm_type, osm_id = identity.parse_osm_ref(args.osm)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    identity.upsert_osm_assignment(
+        paths.place_identity_db,
+        source,
+        source_place_id,
+        osm_type,
+        osm_id,
+        method="manual",
+        confidence="manual",
+        note=args.note,
+    )
+    identity.clear_osm_candidates(paths.place_identity_db, source, source_place_id)
+    print(f"OSM-Zuordnung gespeichert: {args.place} -> {osm_type}/{osm_id}")
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_unassign_osm(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    deleted = identity.delete_osm_assignment(
+        paths.place_identity_db, source, source_place_id
+    )
+    print(
+        f"OSM-Zuordnung entfernt: {args.place}"
+        if deleted
+        else f"Keine OSM-Zuordnung vorhanden: {args.place}"
+    )
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_osm_candidates(args: argparse.Namespace, paths) -> int:
+    rows = identity.load_osm_candidates(paths.place_identity_db, limit=args.limit)
+    if args.source:
+        rows = [row for row in rows if row["source"] == args.source]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print("Keine OSM-Kandidaten.")
+        return 0
+    for row in rows:
+        score = f"{row['score']:.2f}" if row["score"] is not None else "-"
+        distance = (
+            f"{row['distance_m']:.0f} m"
+            if row["distance_m"] is not None
+            else "-"
+        )
+        print(
+            f"{row['source']}:{row['source_place_id']}  {row['name'] or '-'}\n"
+            f"    ~ {row['osm_type']}/{row['osm_id']}  {row['osm_name'] or '-'}  "
+            f"[{score}, {distance}, {row['reason'] or '-'}]"
+        )
+    return 0
+
+
+def _run_osm_accept(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    candidates = [
+        row
+        for row in identity.load_osm_candidates(paths.place_identity_db)
+        if row["source"] == source and row["source_place_id"] == source_place_id
+    ]
+    if args.osm:
+        try:
+            osm_type, osm_id = identity.parse_osm_ref(args.osm)
+        except ValueError as exc:
+            print(f"Fehler: {exc}", file=sys.stderr)
+            return 2
+    elif len(candidates) == 1:
+        osm_type = candidates[0]["osm_type"]
+        osm_id = int(candidates[0]["osm_id"])
+    else:
+        print(
+            f"Fehler: {len(candidates)} Kandidaten für {args.place}; "
+            "bitte mit --osm auswählen.",
+            file=sys.stderr,
+        )
+        return 2
+    identity.upsert_osm_assignment(
+        paths.place_identity_db,
+        source,
+        source_place_id,
+        osm_type,
+        osm_id,
+        method="manual",
+        confidence="manual",
+        note=args.note,
+    )
+    identity.clear_osm_candidates(paths.place_identity_db, source, source_place_id)
+    print(f"OSM-Kandidat übernommen: {args.place} -> {osm_type}/{osm_id}")
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_unmatched(args: argparse.Namespace, paths) -> int:
+    conn = _index_connection(paths.index_db)
+    if conn is None:
+        print(f"Kein Index vorhanden: {paths.index_db}", file=sys.stderr)
+        return 1
+    clauses = ["match_status != 'osm'"]
+    params: list = []
+    if args.city:
+        clauses.append("city = ?")
+        params.append(args.city)
+    limit = f" LIMIT {int(args.limit)}" if args.limit else ""
+    try:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT canonical_key, name, city, match_status, osm_type, osm_id "
+                "FROM canonical_places "
+                f"WHERE {' AND '.join(clauses)} "
+                "ORDER BY city, name"
+                f"{limit}",
+                params,
+            )
+        ]
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print("Alle Orte haben eine OSM-ID.")
+        return 0
+    for row in rows:
+        print(
+            f"{row['canonical_key']}  {row['name'] or '-'}  "
+            f"[{row['city'] or '-'}, {row['match_status']}]"
+        )
+    return 0
+
+
 def _run_thumbs(args: argparse.Namespace) -> int:
     paths = build_paths(args.data_root)
     try:
@@ -323,6 +479,58 @@ def main(argv: list[str] | None = None) -> int:
     )
     stats_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
     stats_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    assign_parser = place_commands.add_parser(
+        "assign-osm", help="einem Quell-Ort manuell eine OSM-ID zuordnen"
+    )
+    assign_parser.add_argument("place", help="source:id des Quell-Orts")
+    assign_parser.add_argument("osm", help="node/123, way-123 oder OSM-URL")
+    assign_parser.add_argument("--note", help="Notiz zur Entscheidung")
+    assign_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    assign_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    assign_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    unassign_parser = place_commands.add_parser(
+        "unassign-osm", help="OSM-Zuordnung eines Quell-Orts entfernen"
+    )
+    unassign_parser.add_argument("place", help="source:id des Quell-Orts")
+    unassign_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    unassign_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    unassign_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    osm_candidates_parser = place_commands.add_parser(
+        "osm-candidates", help="offene OSM-Match-Kandidaten anzeigen"
+    )
+    osm_candidates_parser.add_argument("--source", help="nur diese Quelle")
+    osm_candidates_parser.add_argument("--limit", type=int, help="maximale Anzahl")
+    osm_candidates_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    osm_candidates_parser.add_argument("--json", action="store_true")
+    osm_candidates_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    osm_accept_parser = place_commands.add_parser(
+        "osm-accept", help="OSM-Kandidat als Zuordnung übernehmen"
+    )
+    osm_accept_parser.add_argument("place", help="source:id des Quell-Orts")
+    osm_accept_parser.add_argument("--osm", help="Kandidat auswählen (node/123 ...)")
+    osm_accept_parser.add_argument("--note", help="Notiz zur Entscheidung")
+    osm_accept_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    osm_accept_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    osm_accept_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    unmatched_parser = place_commands.add_parser(
+        "unmatched", help="Orte ohne OSM-ID anzeigen"
+    )
+    unmatched_parser.add_argument("--city", help="nur diese Stadt")
+    unmatched_parser.add_argument("--limit", type=int, help="maximale Anzahl")
+    unmatched_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    unmatched_parser.add_argument("--json", action="store_true")
+    unmatched_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     web_parser = subparsers.add_parser("web", help="Web-Oberfläche starten")
     web_parser.add_argument("--host", default="0.0.0.0")

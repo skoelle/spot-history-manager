@@ -76,6 +76,7 @@ data/
 │   └── thumbs/                320-px-Vorschaubilder für die Web-UI
 ├── yelp/                      yelp.db + media/ + thumbs/ (HTML-Import)
 ├── google/                    (kommt später) google.db
+├── osm/osm.db                 OSM-POI-Cache und Abfrage-Cache (Overpass/Nominatim)
 ├── places/place_rules.db      persistente manuelle Merge-/Unmerge-Regeln
 ├── places/identity.db         persistente OSM-Zuordnungen + URL-Aliase
 ├── index/index.db             zentraler, rebuildbarer Index
@@ -203,6 +204,49 @@ Bekannte Grenzen:
 - Öffentliche Orts-URLs verwenden `canonical_key` (`osm-...` oder `local-...`),
   nicht den internen Integer-`id`. Frühere Keys bleiben über
   `canonical_aliases` (und `data/places/identity.db`) als Redirect erhalten.
+
+## OSM-Zuordnung
+
+```bash
+# Voraussetzung: aktueller Index (liefert Namen, Koordinaten und Quell-Links)
+python3 -m spot_history index build
+
+# Offene Orte über Overpass matchen (Fallback auf Nominatim je Batch)
+python3 -m spot_history osm sync
+
+# Alternativen für Tests oder wenn Overpass nicht erreichbar ist
+python3 -m spot_history osm sync --limit 25 --dry-run --verbose
+python3 -m spot_history osm sync --provider nominatim
+
+# Danach OSM-Keys in den Index übernehmen
+python3 -m spot_history index build
+
+# Status, offene Kandidaten und nicht gematchte Orte
+python3 -m spot_history osm stats
+python3 -m spot_history places osm-candidates [--json]
+python3 -m spot_history places unmatched [--city München] [--json]
+
+# Kandidat oder manuelle OSM-ID übernehmen / Zuordnung entfernen
+python3 -m spot_history places osm-accept foursquare:<venue_id>
+python3 -m spot_history places assign-osm foursquare:<venue_id> way/247857140
+python3 -m spot_history places unassign-osm foursquare:<venue_id>
+```
+
+- `osm sync` liest den Index nur und schreibt ausschließlich in
+  `data/osm/osm.db` (POI-/Abfrage-Cache) und `data/places/identity.db`
+  (Zuordnungen/Kandidaten). Es werden keine Quell-DBs verändert.
+- Overpass wird gebündelt pro `--chunk`-Punkte abgefragt (Default 40, Radius
+  120 m). Schlägt ein Batch fehl, werden die betroffenen Orte über Nominatim
+  nachgeladen; Nominatim wird mit maximal ca. 1 Request/s und Cache genutzt.
+- Automatische Zuordnung nur bei eindeutigem, hohem Score
+  (Name + Distanz/Stadt). Alles andere landet als Kandidat in der
+  Identitäts-DB und muss über `osm-accept`, `assign-osm` oder die Web-UI
+  bestätigt werden.
+- `--force` ignoriert den Abfrage-Cache; `--dry-run` matcht nur und schreibt
+  keine Zuordnungen.
+- OSM-Daten stehen unter ODbL; bei öffentlicher Darstellung ist
+  „© OpenStreetMap contributors“ erforderlich. Nominatim ist kein
+  Massen-Scraper – Cache und Rate-Limit beibehalten.
 
 ## Foursquare-Details
 
