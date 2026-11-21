@@ -160,6 +160,96 @@ class GoogleOsmEnrichTest(unittest.TestCase):
         self.assertEqual(row["name"], "Nominatim Café")
         self.assertEqual(row["name_source"], "nominatim")
 
+    def test_candidates_visible_for_named_unmatched_cluster(self):
+        db = Database(self.config.db_path).open()
+        try:
+            row = db.connection.execute(
+                "SELECT cluster_key FROM clusters"
+            ).fetchone()
+            cluster_key = row["cluster_key"]
+            db.update_cluster_enrichment(
+                cluster_key, name="Test Café", name_source="nominatim"
+            )
+            db.add_candidate(
+                cluster_key,
+                osm_type="node",
+                osm_id=1,
+                osm_name="Test Café",
+                category="cafe",
+                distance_m=5.0,
+                score=0.9,
+                reason="distance_type",
+            )
+            self.assertEqual(
+                [item["cluster_key"] for item in db.candidates()],
+                [cluster_key],
+            )
+            db.update_cluster_enrichment(
+                cluster_key,
+                name="Test Café",
+                name_source="osm",
+                osm_type="node",
+                osm_id=1,
+                distance_m=5.0,
+                score=0.9,
+            )
+            self.assertEqual(db.candidates(), [])
+        finally:
+            db.close()
+
+    def test_enrich_reprocesses_named_cluster_without_osm(self):
+        db = Database(self.config.db_path).open()
+        try:
+            row = db.connection.execute(
+                "SELECT cluster_key FROM clusters"
+            ).fetchone()
+            db.update_cluster_enrichment(
+                row["cluster_key"],
+                name="Nominatim Café",
+                name_source="nominatim",
+            )
+        finally:
+            db.close()
+        with mock.patch.object(osm_enrich, "OverpassClient", FakeOverpass):
+            summary = osm_enrich.enrich(
+                self.config, provider="overpass", sleep=0, log=lambda _: None
+            )
+        self.assertEqual(summary.candidates, 1)
+        self.assertEqual(summary.auto_named, 0)
+        row = self._cluster()
+        self.assertEqual(row["name"], "Nominatim Café")
+        self.assertEqual(row["name_source"], "nominatim")
+        db = Database(self.config.db_path).open()
+        try:
+            candidates = db.candidates()
+        finally:
+            db.close()
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["osm_name"], "Test Café")
+
+    def test_named_cluster_with_osm_is_skipped(self):
+        db = Database(self.config.db_path).open()
+        try:
+            row = db.connection.execute(
+                "SELECT cluster_key FROM clusters"
+            ).fetchone()
+            db.update_cluster_enrichment(
+                row["cluster_key"],
+                name="Test Café",
+                name_source="osm",
+                osm_type="node",
+                osm_id=1,
+            )
+        finally:
+            db.close()
+        with mock.patch.object(osm_enrich, "OverpassClient", FakeOverpass):
+            summary = osm_enrich.enrich(
+                self.config, provider="overpass", sleep=0, log=lambda _: None
+            )
+        self.assertEqual(summary.pending, 0)
+        self.assertEqual(summary.auto_named, 0)
+        self.assertEqual(summary.skipped, 1)
+
     def test_home_and_work_are_skipped(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()

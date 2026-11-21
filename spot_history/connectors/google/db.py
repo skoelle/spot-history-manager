@@ -457,7 +457,7 @@ class Database:
     def clusters_for_enrichment(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT cluster_key, lat, lng, semantic_type, name, name_source, "
-            "address, representative_place_id FROM clusters "
+            "address, representative_place_id, osm_id FROM clusters "
             "WHERE lat IS NOT NULL AND lng IS NOT NULL "
             "AND COALESCE(semantic_type, '') NOT IN ('Home', 'Work', 'Inferred Work') "
             "ORDER BY visit_count DESC"
@@ -550,9 +550,9 @@ class Database:
             "p.name AS cluster_name, p.address, p.semantic_type "
             "FROM osm_candidates c LEFT JOIN clusters p "
             "ON p.cluster_key = c.cluster_key "
-            "WHERE c.osm_name IS NULL OR ("
-            "lower(c.osm_name) != lower(coalesce(p.name, '')) AND "
-            "lower(c.osm_name) != lower(coalesce(p.address, ''))) "
+            "WHERE p.osm_id IS NULL "
+            "AND COALESCE(p.name_source, '') NOT IN "
+            "('manual', 'semantic', 'source') "
             "ORDER BY c.distance_m, c.osm_name"
         )
         if limit:

@@ -253,7 +253,11 @@ def enrich(
             if name_source in ("manual", "semantic", "source"):
                 summary.skipped += 1
                 continue
-            if cluster.get("name") and not force:
+            if (
+                cluster.get("name")
+                and cluster.get("osm_id") is not None
+                and not force
+            ):
                 summary.skipped += 1
                 continue
             pending.append(cluster)
@@ -284,7 +288,10 @@ def enrich(
             decision, best = decide(candidates)
             semantic = cluster.get("semantic_type")
             if decision == "auto" and best is not None:
-                if semantic == "Searched Address" and best.distance_m > 15:
+                if (
+                    (cluster.get("name") and cluster.get("osm_id") is None)
+                    or (semantic == "Searched Address" and best.distance_m > 15)
+                ):
                     decision = "candidate"
                 else:
                     _apply_osm_name(db, cluster, best, dry_run=dry_run)
@@ -351,7 +358,13 @@ def enrich(
                 decision, best = decide(candidates)
                 semantic = cluster.get("semantic_type")
                 if decision == "auto" and best is not None:
-                    if semantic == "Searched Address" and best.distance_m > 15:
+                    if (
+                        (cluster.get("name") and cluster.get("osm_id") is None)
+                        or (
+                            semantic == "Searched Address"
+                            and best.distance_m > 15
+                        )
+                    ):
                         decision = "candidate"
                     else:
                         _apply_osm_name(db, cluster, best, dry_run=dry_run)
