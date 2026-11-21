@@ -88,7 +88,7 @@ class FakeConnector(BaseConnector):
             "source": "fake",
             "record_id": "rec4",
             "kind": "unlinked_comment",
-            "source_place_id": None,
+            "source_place_id": "p1",
             "created_at": 1550000000,
             "payload": {
                 "place_name": "Ohne Check-in",
@@ -100,7 +100,7 @@ class FakeConnector(BaseConnector):
             "source": "fake",
             "record_id": "rec5",
             "kind": "unlinked_photo",
-            "source_place_id": None,
+            "source_place_id": "p1",
             "created_at": 1540000000,
             "payload": {
                 "place_name": "Ohne Check-in",
@@ -220,6 +220,37 @@ class DetailsConnector(BaseConnector):
         }
 
 
+class CommentConnector(BaseConnector):
+    name = "comment"
+    kind = "import"
+
+    def iter_visits(self):
+        yield Visit(
+            source="comment",
+            source_visit_id="c1",
+            visited_at=1700000000,
+            lat=48.1,
+            lng=11.5,
+            place_name="Kommentar Ort",
+            source_place_id="cp1",
+            city="München",
+            country_code="DE",
+            note="Check-in",
+            extra={"comments": ["Kommentar am Check-in"]},
+        )
+        yield Visit(
+            source="comment",
+            source_visit_id="comment:c2",
+            visited_at=1690000000,
+            place_name="Kommentar Ort",
+            source_place_id="cp1",
+            city="München",
+            country_code="DE",
+            note="Nur Kommentar",
+            extra={"comment_only": True, "has_coords": False},
+        )
+
+
 class WebDataTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -281,6 +312,9 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(details["date_refreshed"], "2026-11-20")
         self.assertEqual(len(venue["records"]["survey_answer"]), 1)
         self.assertEqual(venue["records"]["survey_answer"][0]["payload"]["answer"], "Ja")
+        self.assertNotIn("unlinked_comment", venue["records"])
+        self.assertEqual(len(venue["records"]["unlinked_photo"]), 1)
+        self.assertTrue(venue["records"]["unlinked_photo"][0]["without_checkin"])
         self.assertNotIn("account", venue["records"])
         self.assertNotIn("message", venue["records"])
         visits = web_data.query_visits(
@@ -490,10 +524,8 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(account["records"][0]["payload"], {"Vorname": "Test"})
         message = next(group for group in groups if group["kind"] == "message")
         self.assertEqual(message["records"][0]["payload"]["text"], "Servus")
-        self.assertEqual(
-            labels["unlinked_comment"], "Nicht zugeordnete Kommentare"
-        )
-        self.assertEqual(labels["unlinked_photo"], "Nicht zugeordnete Fotos")
+        self.assertEqual(labels["unlinked_comment"], "Kommentare ohne Check-in")
+        self.assertEqual(labels["unlinked_photo"], "Fotos ohne Check-in")
         comment = next(
             group for group in groups if group["kind"] == "unlinked_comment"
         )
@@ -535,6 +567,30 @@ class WebDataTest(unittest.TestCase):
             detail["records"]["survey_answer"][0]["payload"]["question"],
             "Gibt es Bier?",
         )
+        self.assertNotIn("unlinked_comment", detail["records"])
+        self.assertEqual(len(detail["records"]["unlinked_photo"]), 1)
+
+    def test_comment_visits_are_marked_and_derive_coords(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"comment": CommentConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                visits = web_data.query_visits(
+                    conn, web_data.Filters(), limit=10, offset=0
+                )
+                points = web_data.query_map_points(conn, web_data.Filters())
+            finally:
+                conn.close()
+
+        by_id = {visit["source_visit_id"]: visit for visit in visits}
+        self.assertTrue(by_id["c1"]["is_comment_only"] is False)
+        self.assertEqual(by_id["c1"]["comments"], ["Kommentar am Check-in"])
+        self.assertTrue(by_id["comment:c2"]["is_comment_only"])
+        self.assertEqual(by_id["comment:c2"]["note"], "Nur Kommentar")
+        self.assertTrue(by_id["comment:c2"]["coords_derived"])
+        self.assertEqual(len(points), 2)
+        self.assertEqual(sum(1 for point in points if point["is_comment_only"]), 1)
 
     def test_thumb_relpath_is_stable(self):
         first = thumb_relpath("foursquare", "abc")

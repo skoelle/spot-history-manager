@@ -156,6 +156,7 @@
                     {% if visit.address %} · {{ visit.address }}{% endif %}
                 </div>
                 {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}
+                {% for comment in visit.comments %}<div class="visit-note">„{{ comment }}“</div>{% endfor %}
                 {% if visit_photos %}
                 <div class="visit-photos">
                     {% for photo in visit_photos %}
@@ -175,6 +176,7 @@
             </div>
             <div class="visit-meta">
                 <span class="badge source-{{ visit.source }}">{{ visit.source }}</span>
+                {% if visit.is_comment_only %}<span class="badge">Kommentar</span>{% endif %}
                 {% if visit.coords_derived %}
                 <span class="badge derived">Ort abgeleitet</span>
                 {% endif %}

@@ -131,6 +131,10 @@ def _format_moment(local_datetime: str | None, visited_at: int) -> datetime:
 
 def _format_row(row: sqlite3.Row) -> dict:
     moment = _format_moment(row["local_datetime"], row["visited_at"])
+    extra = _parse_json(row["extra_json"]) or {}
+    comments = extra.get("comments")
+    if not isinstance(comments, list):
+        comments = []
     return {
         "id": row["id"],
         "source": row["source"],
@@ -163,12 +167,14 @@ def _format_row(row: sqlite3.Row) -> dict:
         "photo_count": row["photo_count"] or 0,
         "has_coords": bool(row["has_coords"]),
         "coords_derived": bool(row["coords_derived"]),
+        "is_comment_only": bool(extra.get("comment_only")),
+        "comments": [text for text in comments if text],
     }
 
 
 VISIT_SELECT = (
     "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
-    "v.note, v.source_url, v.has_coords, v.coords_derived, "
+    "v.note, v.source_url, v.extra_json, v.has_coords, v.coords_derived, "
     "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
     "p.category, p.address, p.city, p.state, p.country_code, "
     "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
@@ -232,6 +238,9 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "photo_count": row["photo_count"] or 0,
             "has_coords": bool(row["has_coords"]),
             "coords_derived": bool(row["coords_derived"]),
+            "is_comment_only": bool(
+                (_parse_json(row["extra_json"]) or {}).get("comment_only")
+            ),
         }
         for row in rows
     ]
@@ -616,7 +625,11 @@ def _details_for_links(conn: sqlite3.Connection, links: list[dict]) -> dict:
     return details
 
 
-VENUE_RECORD_KINDS = ("survey_answer", "business_interaction")
+VENUE_RECORD_KINDS = (
+    "survey_answer",
+    "business_interaction",
+    "unlinked_photo",
+)
 
 ACTIVITY_ORDER = (
     ("account", "Konto"),
@@ -628,8 +641,8 @@ ACTIVITY_ORDER = (
     ("review_feedback", "Review-Feedback"),
     ("photo_feedback", "Foto-Feedback"),
     ("business_interaction", "Interaktionen"),
-    ("unlinked_comment", "Nicht zugeordnete Kommentare"),
-    ("unlinked_photo", "Nicht zugeordnete Fotos"),
+    ("unlinked_comment", "Kommentare ohne Check-in"),
+    ("unlinked_photo", "Fotos ohne Check-in"),
 )
 
 
@@ -649,6 +662,8 @@ def _record_row(row: sqlite3.Row) -> dict:
         ),
         "payload": payload,
     }
+    if row["kind"] in ("unlinked_comment", "unlinked_photo"):
+        record["without_checkin"] = True
     if row["kind"] == "unlinked_photo":
         local_path = payload.get("local_path") or ""
         media_type = payload.get("media_type")

@@ -97,6 +97,7 @@ class SourcePlace:
     country_code: str | None = None
     place_url: str | None = None
     visit_count: int = 0
+    comment_only: bool = False
     osm_type: str | None = None
     osm_id: int | None = None
 
@@ -297,6 +298,9 @@ def collect_source_places(visits: Iterable[Any]) -> dict[tuple[str, str], Source
                 setattr(place, attribute, value)
             elif attribute == "name" and getattr(visit, "place_name", None):
                 place.name = visit.place_name
+        extra = getattr(visit, "extra", None) or {}
+        if extra.get("comment_only"):
+            place.comment_only = True
         place.visit_count += 1
     return places
 
@@ -474,6 +478,26 @@ def resolve_canonical_places(
                 methods.setdefault(second.key, "name_city")
             else:
                 add_candidate(first, second, "name_city_ambiguous", "low", None, city)
+
+        coordless = [
+            place
+            for place in group
+            if not place.has_coords
+            and not place.city
+            and place.comment_only
+            and place.key not in standalone
+        ]
+        candidates_unique = [
+            place
+            for place in group
+            if place not in coordless and place.key not in standalone
+        ]
+        if len(coordless) == 1 and len(candidates_unique) == 1:
+            first, second = coordless[0], candidates_unique[0]
+            if first.source != second.source and not osm_conflict(first, second):
+                union.union(first.key, second.key)
+                methods.setdefault(first.key, "name_unique")
+                methods.setdefault(second.key, "name_unique")
 
     canonical: list[CanonicalPlace] = []
     for keys in union.groups().values():

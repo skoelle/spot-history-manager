@@ -26,6 +26,7 @@ def place(
     url=None,
     osm_type=None,
     osm_id=None,
+    comment_only=False,
 ):
     return SourcePlace(
         source=source,
@@ -37,6 +38,7 @@ def place(
         place_url=url,
         osm_type=osm_type,
         osm_id=osm_id,
+        comment_only=comment_only,
     )
 
 
@@ -83,6 +85,30 @@ class PlacesMatchTest(unittest.TestCase):
         canonical, candidates = resolve_canonical_places(places)
         self.assertEqual(len(canonical), 1)
         self.assertEqual(canonical[0].methods[("yelp", "y1")], "name_city")
+        self.assertEqual(candidates, [])
+
+    def test_coordless_unique_name_merges(self):
+        places = [
+            place("foursquare", "v1", "München Hauptbahnhof", 48.14, 11.55, city="München"),
+            place("yelp", "y1", "München Hauptbahnhof", comment_only=True),
+        ]
+        canonical, candidates = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(canonical[0].methods[("yelp", "y1")], "name_unique")
+        self.assertEqual(candidates, [])
+
+    def test_coordless_ambiguous_name_is_not_merged(self):
+        places = [
+            place("foursquare", "v1", "Cafe Blue", 48.1, 11.5, city="München"),
+            place("foursquare", "v2", "Cafe Blue", 48.2, 11.6, city="München"),
+            place("yelp", "y1", "Cafe Blue", comment_only=True),
+        ]
+        canonical, candidates = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 3)
+        yelp_canonical = next(
+            item for item in canonical if ("yelp", "y1") in item.methods
+        )
+        self.assertEqual(yelp_canonical.methods[("yelp", "y1")], "single")
         self.assertEqual(candidates, [])
 
     def test_far_coords_same_city_becomes_candidate(self):

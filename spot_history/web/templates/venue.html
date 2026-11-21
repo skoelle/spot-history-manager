@@ -103,7 +103,8 @@
 
     {% set survey_answers = venue.records.get('survey_answer', []) %}
     {% set interactions = venue.records.get('business_interaction', []) %}
-    {% if survey_answers or interactions %}
+    {% set no_checkin_photos = venue.records.get('unlinked_photo', []) %}
+    {% if survey_answers or interactions or no_checkin_photos %}
     <div class="box yelp-details">
         <div class="box-title">Yelp-Details</div>
         {% if survey_answers %}
@@ -136,6 +137,17 @@
                 </li>
                 {% endfor %}
             </ul>
+        </div>
+        {% endif %}
+        {% if no_checkin_photos %}
+        <div class="detail-section">
+            <div class="detail-heading">Fotos ohne Check-in · {{ no_checkin_photos|length }}</div>
+            <div class="photo-grid">
+                {% for item in no_checkin_photos %}
+                {% set photo = item %}
+                {% include "_photo_card.html" %}
+                {% endfor %}
+            </div>
         </div>
         {% endif %}
     </div>
@@ -238,9 +250,11 @@
                     {% if visit.city %} · {{ visit.city }}{% endif %}
                 </div>
                 {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}
+                {% for comment in visit.comments %}<div class="visit-note">„{{ comment }}“</div>{% endfor %}
             </div>
             <div class="visit-meta">
                 <span class="badge source-{{ visit.source }}">{{ visit.source }}</span>
+                {% if visit.is_comment_only %}<span class="badge">Kommentar</span>{% endif %}
                 {% if visit.photo_count %}
                 <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
                 {% endif %}

@@ -168,7 +168,7 @@ class YelpImportTest(unittest.TestCase):
         with mock.patch.object(connector_module, "build_config", return_value=self.config):
             visits = list(YelpConnector().iter_visits())
 
-        self.assertEqual(len(visits), 4)
+        self.assertEqual(len(visits), 5)
         self.assertEqual({visit.source for visit in visits}, {"yelp"})
 
         old = next(visit for visit in visits if visit.place_name == "Alte Bäckerei")
@@ -183,12 +183,23 @@ class YelpImportTest(unittest.TestCase):
         self.assertAlmostEqual(bar.lng, 11.6)
         self.assertEqual(len(bar.photos), 2)
         self.assertTrue(bar.extra["has_coords"])
+        self.assertEqual(bar.extra["comments"], ["Lecker!"])
 
         cafe = next(visit for visit in visits if visit.note == "Zweiter Besuch")
         self.assertEqual(cafe.place_name, "Test Café")
         self.assertEqual(cafe.source, "yelp")
         self.assertEqual(cafe.place_url, "https://example.invalid/test-cafe")
         self.assertEqual(cafe.source_url, "https://example.invalid/test-cafe")
+
+        comment_visit = next(
+            visit for visit in visits if visit.source_visit_id.startswith("comment:")
+        )
+        self.assertEqual(comment_visit.place_name, "Unbekannter Ort")
+        self.assertEqual(comment_visit.note, "Kein passender Check-in")
+        self.assertEqual(comment_visit.source_place_id, place_key("Unbekannter Ort"))
+        self.assertIsNone(comment_visit.lat)
+        self.assertTrue(comment_visit.extra["comment_only"])
+        self.assertEqual(comment_visit.tz_offset, 0)
 
     def test_iter_visits_without_db_is_empty(self):
         empty = build_config(export_dir=self.export, data_dir=self.root / "empty")

@@ -98,12 +98,16 @@ class YelpExtrasTest(unittest.TestCase):
         ]
         self.assertEqual(len(unlinked_comments), 1)
         self.assertEqual(len(unlinked_photos), 2)
-        self.assertTrue(
-            all(
-                record["source_place_id"] is None
-                for record in unlinked_comments + unlinked_photos
-            )
+        self.assertEqual(
+            unlinked_comments[0]["source_place_id"],
+            place_key("Unbekannter Ort"),
         )
+        photo_places = {
+            record["payload"]["media_type"]: record["source_place_id"]
+            for record in unlinked_photos
+        }
+        self.assertEqual(photo_places["biz_photo"], place_key("Unbekannter Ort"))
+        self.assertIsNone(photo_places["profile_photo"])
         self.assertEqual(
             {record["payload"]["media_type"] for record in unlinked_photos},
             {"biz_photo", "profile_photo"},

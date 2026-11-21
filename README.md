@@ -112,11 +112,17 @@ Die Fotoseite `/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle,
 Suche) und Pagination; Klick öffnet eine Lightbox mit dem Original.
 Check-in-Karten zeigen bis zu drei Vorschaubilder, Venue-Detailseiten eine
 Galerie. Yelp-Videos werden als eigener Video-Eintrag dargestellt.
-Venue-Detailseiten zeigen zusätzlich Yelp-Survey-Antworten und passende
-Business-Interaktionen. Die Seite `/aktivitaet` bündelt Komplimente,
-Nachrichten, Milestones, Forumsbeiträge, Review-/Foto-Feedback, Interaktionen
-sowie die nicht zugeordneten Check-in-Kommentare und -Fotos. Foto-Feedback
-verlinkt auf die Yelp-Fotoseite, da im Export kein lokales Bild dazu existiert.
+Venue-Detailseiten zeigen zusätzlich Yelp-Survey-Antworten, passende
+Business-Interaktionen sowie Fotos ohne Check-in, die über den Ortsnamen der
+Venue zugeordnet wurden (Badge „ohne Check-in“). Kommentare ohne Check-in
+werden als echte Visits behandelt: Sie erscheinen in der Check-in-Liste, der
+Venue-Historie, den Zählern und – bei vorhandenen Ortskoordinaten – als
+abgeleitete Kartenpunkte, jeweils mit Badge „Kommentar“. Kommentare zu einem
+vorhandenen Check-in erscheinen als Kommentarzeilen am jeweiligen Visit.
+Die Seite `/aktivitaet` bündelt zusätzlich Komplimente, Nachrichten,
+Milestones, Forumsbeiträge, Review-/Foto-Feedback und Interaktionen.
+Foto-Feedback verlinkt auf die Yelp-Fotoseite, da im Export kein lokales Bild
+dazu existiert.
 Sensible Felder (E-Mail, Telefon, IP-Adressen, Logins, gemeldete Inhalte)
 werden importiert, aber nicht im Web angezeigt.
 
@@ -330,6 +336,9 @@ python3 -m spot_history yelp stats
 ```
 
 - 462 Check-ins, 284 Orte, 92 mit Quellkoordinaten, 270 Medien
+- 20 Kommentare ohne Check-in werden als zusätzliche Visits importiert
+  (Badge „Kommentar“); 8 bereits verknüpfte Kommentare erscheinen am
+  jeweiligen Check-in-Visit
 - Zusätzlich importiert: 39 Survey-Antworten, 45 Business-Interaktionen,
   36 Review-Feedback, 8 Foto-Feedback, 143 Komplimente, 25 Nachrichten,
   3 Milestones, 2 Forumsbeiträge, 1 Profilfrage und die Kontodaten

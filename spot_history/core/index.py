@@ -456,6 +456,7 @@ def build_index(
             "osm": "high",
             "name_coords": "high",
             "name_city": "medium",
+            "name_unique": "medium",
             "single": "high",
         }
         canonical_ids: dict[tuple[str, str], int] = {}

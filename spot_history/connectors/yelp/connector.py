@@ -7,6 +7,7 @@ from pathlib import Path
 from ..base import BaseConnector, Photo, Visit
 from .config import build_config
 from .db import Database, iso_range
+from .ids import place_key
 
 SOURCE = "yelp"
 
@@ -234,7 +235,7 @@ class YelpConnector(BaseConnector):
                     "SELECT id, created_at, place_name, text, status "
                     "FROM checkin_comments WHERE checkin_id IS NULL",
                     lambda row: (
-                        None,
+                        place_key(row["place_name"]) if row["place_name"] else None,
                         row["created_at"],
                         {
                             "place_name": row["place_name"],
@@ -245,11 +246,12 @@ class YelpConnector(BaseConnector):
                 ),
                 (
                     "unlinked_photo",
-                    "SELECT id, created_at, place_name, media_type, filename, "
-                    "local_path, caption, status FROM photos "
+                    "SELECT id, created_at, place_name, place_key, media_type, "
+                    "filename, local_path, caption, status FROM photos "
                     "WHERE checkin_id IS NULL",
                     lambda row: (
-                        None,
+                        row["place_key"]
+                        or (place_key(row["place_name"]) if row["place_name"] else None),
                         row["created_at"],
                         {
                             "place_name": row["place_name"],
@@ -412,6 +414,23 @@ class YelpConnector(BaseConnector):
             place_url_column = (
                 "p.place_url" if "place_url" in place_columns else "NULL AS place_url"
             )
+            place_url_expr = (
+                "place_url" if "place_url" in place_columns else "NULL AS place_url"
+            )
+            places_by_key = {
+                row["place_key"]: row
+                for row in conn.execute(
+                    "SELECT place_key, city, state, country_code, "
+                    f"{place_url_expr} FROM places"
+                )
+            }
+            linked_comments: dict[str, list[str]] = {}
+            for row in conn.execute(
+                "SELECT checkin_id, text FROM checkin_comments "
+                "WHERE checkin_id IS NOT NULL AND text IS NOT NULL AND text != '' "
+                "ORDER BY created_at"
+            ):
+                linked_comments.setdefault(row["checkin_id"], []).append(row["text"])
             for row in conn.execute(
                 "SELECT id, checkin_id, created_at, local_path FROM photos "
                 "WHERE checkin_id IS NOT NULL ORDER BY created_at"
@@ -432,6 +451,10 @@ class YelpConnector(BaseConnector):
             )
             for row in rows:
                 has_coords = row["lat"] is not None and row["lng"] is not None
+                extra = {"status": row["status"], "has_coords": has_coords}
+                comments = linked_comments.get(row["id"])
+                if comments:
+                    extra["comments"] = comments
                 yield Visit(
                     source=SOURCE,
                     source_visit_id=row["id"],
@@ -448,7 +471,38 @@ class YelpConnector(BaseConnector):
                     place_url=row["place_url"],
                     tz_offset=None,
                     photos=photos.get(row["id"], []),
-                    extra={"status": row["status"], "has_coords": has_coords},
+                    extra=extra,
+                )
+            for row in conn.execute(
+                "SELECT id, created_at, tz_offset, place_name, text, status "
+                "FROM checkin_comments WHERE checkin_id IS NULL "
+                "AND place_name IS NOT NULL AND place_name != '' "
+                "ORDER BY created_at"
+            ):
+                if row["created_at"] is None:
+                    continue
+                key = place_key(row["place_name"])
+                place = places_by_key.get(key)
+                yield Visit(
+                    source=SOURCE,
+                    source_visit_id=f"comment:{row['id']}",
+                    visited_at=int(row["created_at"]),
+                    lat=None,
+                    lng=None,
+                    place_name=row["place_name"],
+                    source_place_id=key,
+                    city=place["city"] if place else None,
+                    state=place["state"] if place else None,
+                    country_code=place["country_code"] if place else None,
+                    note=row["text"] or None,
+                    source_url=place["place_url"] if place else None,
+                    place_url=place["place_url"] if place else None,
+                    tz_offset=row["tz_offset"],
+                    extra={
+                        "status": row["status"],
+                        "has_coords": False,
+                        "comment_only": True,
+                    },
                 )
         finally:
             conn.close()
