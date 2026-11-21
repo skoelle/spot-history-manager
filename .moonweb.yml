@@ -1,0 +1,6 @@
+title: "Spot History Manager"
+emoji: "📍"
+category: code
+subcategory: "Apps"
+status: active
+stack: [Python, FastAPI, Uvicorn, Jinja2, Pillow, SQLite]
