@@ -79,6 +79,31 @@ CREATE TABLE IF NOT EXISTS venues (
     updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS venue_details (
+    venue_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL DEFAULT 'places_api',
+    name TEXT,
+    tel TEXT,
+    website TEXT,
+    email TEXT,
+    social_json TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    country_code TEXT,
+    formatted_address TEXT,
+    lat REAL,
+    lng REAL,
+    categories_json TEXT,
+    date_created TEXT,
+    date_refreshed TEXT,
+    placemaker_url TEXT,
+    has_related INTEGER NOT NULL DEFAULT 0,
+    fetched_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS checkin_categories (
     checkin_id TEXT NOT NULL REFERENCES checkins(id) ON DELETE CASCADE,
     category_id TEXT NOT NULL,
@@ -304,6 +329,26 @@ ON CONFLICT(id) DO UPDATE SET
     checkin_id=excluded.checkin_id, created_at=excluded.created_at,
     user_id=excluded.user_id, user_display_name=excluded.user_display_name,
     text=excluded.text, raw_json=excluded.raw_json
+"""
+
+VENUE_DETAIL_SQL = """
+INSERT INTO venue_details (
+    venue_id, source, name, tel, website, email, social_json, address, city,
+    state, postal_code, country_code, formatted_address, lat, lng,
+    categories_json, date_created, date_refreshed, placemaker_url, has_related,
+    fetched_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(venue_id) DO UPDATE SET
+    source=excluded.source, name=excluded.name, tel=excluded.tel,
+    website=excluded.website, email=excluded.email,
+    social_json=excluded.social_json, address=excluded.address,
+    city=excluded.city, state=excluded.state, postal_code=excluded.postal_code,
+    country_code=excluded.country_code,
+    formatted_address=excluded.formatted_address, lat=excluded.lat,
+    lng=excluded.lng, categories_json=excluded.categories_json,
+    date_created=excluded.date_created, date_refreshed=excluded.date_refreshed,
+    placemaker_url=excluded.placemaker_url, has_related=excluded.has_related,
+    fetched_at=excluded.fetched_at, updated_at=excluded.updated_at
 """
 
 VENUE_HISTORY_SQL = """
@@ -767,6 +812,62 @@ class Database:
                 count += 1
         return count
 
+    def upsert_venue_details(self, items: list[dict[str, Any]]) -> int:
+        if not items:
+            return 0
+        now = iso_now()
+        count = 0
+        with self.conn:
+            for item in items:
+                venue_id = item.get("id") or item.get("venue_id")
+                if not venue_id:
+                    continue
+                social = item.get("social") or item.get("social_media") or {}
+                categories = item.get("categories") or []
+                if categories and isinstance(categories[0], dict):
+                    categories = [
+                        category.get("name") or category.get("short_name")
+                        for category in categories
+                        if category.get("name") or category.get("short_name")
+                    ]
+                related = item.get("related")
+                if related is None:
+                    related = item.get("has_related")
+                self.conn.execute(
+                    VENUE_DETAIL_SQL,
+                    (
+                        venue_id,
+                        item.get("source") or "places_api",
+                        item.get("name"),
+                        item.get("tel"),
+                        item.get("website"),
+                        item.get("email"),
+                        json.dumps(social, ensure_ascii=False, separators=(",", ":")),
+                        item.get("address"),
+                        item.get("city") or item.get("locality"),
+                        item.get("state") or item.get("region"),
+                        item.get("postal_code") or item.get("postcode"),
+                        item.get("country_code") or item.get("country"),
+                        item.get("formatted_address"),
+                        item.get("lat"),
+                        item.get("lng"),
+                        json.dumps(categories, ensure_ascii=False, separators=(",", ":")),
+                        item.get("date_created"),
+                        item.get("date_refreshed"),
+                        item.get("placemaker") or item.get("placemaker_url"),
+                        1 if related else 0,
+                        item.get("fetched_at") or now,
+                        now,
+                    ),
+                )
+                count += 1
+        return count
+
+    def venue_detail_rows(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM venue_details ORDER BY venue_id"
+        ).fetchall()
+
     def upsert_lists(self, items: list[dict[str, Any]]) -> int:
         if not items:
             return 0
@@ -1069,6 +1170,15 @@ class Database:
         comments = conn.execute("SELECT COUNT(*) AS v FROM checkin_comments").fetchone()["v"]
         likes = conn.execute("SELECT COUNT(*) AS v FROM likes").fetchone()["v"]
         venues = conn.execute("SELECT COUNT(*) AS v FROM venues").fetchone()["v"]
+        venue_details = conn.execute(
+            "SELECT COUNT(*) AS v FROM venue_details"
+        ).fetchone()["v"]
+        venue_contacts = conn.execute(
+            "SELECT COUNT(*) AS v FROM venue_details "
+            "WHERE tel IS NOT NULL AND tel != '' "
+            "OR website IS NOT NULL AND website != '' "
+            "OR email IS NOT NULL AND email != ''"
+        ).fetchone()["v"]
         venue_history = conn.execute(
             "SELECT COUNT(*) AS v FROM venue_history"
         ).fetchone()["v"]
@@ -1097,6 +1207,8 @@ class Database:
             "oldest": bounds["lo"],
             "newest": bounds["hi"],
             "venues": venues,
+            "venue_details": venue_details,
+            "venue_contacts": venue_contacts,
             "photos_total": photos_total,
             "photos_downloaded": photos_done,
             "comments": comments,

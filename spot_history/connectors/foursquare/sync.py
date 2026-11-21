@@ -443,7 +443,11 @@ class Sync:
             stats["tastes"],
         )
         self.db.set_diagnostic(
-            "venue_details", None, None, "blocked: 402/429, keine Credits"
+            "venue_details",
+            None,
+            stats["venue_details"] or None,
+            "Places-API-Baseline (Import)"
+            if stats["venue_details"] else "kein Import",
         )
 
     def fetch_comments(self) -> int:

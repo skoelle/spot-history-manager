@@ -27,6 +27,32 @@ class FakeConnector(BaseConnector):
             "updated_at": "2026-11-20T00:00:00+00:00",
         }
 
+    def iter_place_details(self):
+        yield {
+            "source": "fake",
+            "source_place_id": "p1",
+            "name": "Testort",
+            "tel": "089 123",
+            "website": "https://example.invalid",
+            "email": "ort@example.invalid",
+            "social_json": '{"instagram": "testort"}',
+            "address": "Teststr. 1",
+            "city": "München",
+            "state": "BY",
+            "postal_code": "80331",
+            "country_code": "DE",
+            "formatted_address": "Teststr. 1, 80331 München",
+            "lat": 48.1,
+            "lng": 11.5,
+            "categories_json": '["Café", "Bakery"]',
+            "date_created": "2010-01-01",
+            "date_refreshed": "2026-11-20",
+            "placemaker_url": "https://placemaker.invalid/p1",
+            "has_related": 1,
+            "fetched_at": "2026-11-20T00:00:00+00:00",
+            "updated_at": "2026-11-20T00:00:00+00:00",
+        }
+
     def iter_visits(self):
         yield Visit(
             source="fake",
@@ -86,6 +112,10 @@ class IndexTest(unittest.TestCase):
                 profiles = conn.execute(
                     "SELECT source, display_name, counts_json FROM source_profiles"
                 ).fetchall()
+                details = conn.execute(
+                    "SELECT source, source_place_id, tel, categories_json "
+                    "FROM place_details"
+                ).fetchall()
             finally:
                 conn.close()
             self.assertEqual(visits, 2)
@@ -95,6 +125,10 @@ class IndexTest(unittest.TestCase):
             self.assertEqual(profiles[0][0], "fake")
             self.assertEqual(profiles[0][1], "Test User")
             self.assertIn('"checkins": 2', profiles[0][2])
+            self.assertEqual(summary["place_details"], 1)
+            self.assertEqual(details[0][0], "fake")
+            self.assertEqual(details[0][1], "p1")
+            self.assertEqual(details[0][2], "089 123")
 
             payload = json.loads(Path(paths.map_geojson).read_text(encoding="utf-8"))
             self.assertEqual(payload["type"], "FeatureCollection")

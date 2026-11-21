@@ -568,6 +568,24 @@ button:hover,
     color: var(--accent);
 }
 
+.venue-details-facts {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+}
+
+.venue-categories {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+}
+
+.venue-detail-note {
+    margin-top: 0.75rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
 
 .photo-box {
     margin-bottom: 1.5rem;

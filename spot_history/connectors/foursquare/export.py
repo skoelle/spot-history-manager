@@ -60,6 +60,33 @@ VENUE_FIELDS = [
     "closed", "updated_at",
 ]
 
+VENUE_DETAILS_FIELDS = [
+    "venue_id", "name", "tel", "website", "email", "facebook_id", "instagram",
+    "twitter", "address", "city", "state", "postal_code", "country_code",
+    "formatted_address", "lat", "lng", "categories", "date_created",
+    "date_refreshed", "related", "source", "fetched_at", "updated_at",
+]
+
+
+def _json_object(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_list(value: str | None) -> list:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
 
 def _write_json(path: Path, payload) -> None:
     tmp = path.with_name(path.name + ".tmp")
@@ -235,9 +262,26 @@ def export_all(db: Database, cfg: FoursquareConfig, log=print) -> dict[str, Path
     _write_csv(path, VENUE_FIELDS, rows)
     paths["venues_csv"] = path
 
+    details_rows = []
+    for row in db.venue_detail_rows():
+        social = _json_object(row["social_json"])
+        details_rows.append([
+            row["venue_id"], row["name"], row["tel"], row["website"],
+            row["email"], social.get("facebook_id"), social.get("instagram"),
+            social.get("twitter"), row["address"], row["city"], row["state"],
+            row["postal_code"], row["country_code"], row["formatted_address"],
+            row["lat"], row["lng"],
+            " | ".join(str(name) for name in _json_list(row["categories_json"])),
+            row["date_created"], row["date_refreshed"], row["has_related"],
+            row["source"], row["fetched_at"], row["updated_at"],
+        ])
+    path = data_dir / "venue_details.csv"
+    _write_csv(path, VENUE_DETAILS_FIELDS, details_rows)
+    paths["venue_details_csv"] = path
+
     log(
         f"Export: {len(raw)} Check-ins, {len(like_rows)} Likes, "
         f"{len(db.tip_rows())} Tipps, {len(db.taste_rows())} Tastes, "
-        f"{len(rows)} Venues -> {data_dir}"
+        f"{len(rows)} Venues, {len(details_rows)} Venue-Details -> {data_dir}"
     )
     return paths

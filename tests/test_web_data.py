@@ -26,6 +26,32 @@ class FakeConnector(BaseConnector):
             "updated_at": "2026-11-20T00:00:00+00:00",
         }
 
+    def iter_place_details(self):
+        yield {
+            "source": "fake",
+            "source_place_id": "p1",
+            "name": "Michaeligarten",
+            "tel": "089 123",
+            "website": "example.invalid",
+            "email": "info@example.invalid",
+            "social_json": '{"instagram": "michi", "twitter": ""}',
+            "address": "Michaelistr. 1",
+            "city": "München",
+            "state": "BY",
+            "postal_code": "80331",
+            "country_code": "DE",
+            "formatted_address": "Michaelistr. 1, 80331 München",
+            "lat": 48.1,
+            "lng": 11.5,
+            "categories_json": '["Beer Garden", "Restaurant"]',
+            "date_created": "2010-01-01",
+            "date_refreshed": "2026-11-20",
+            "placemaker_url": "https://placemaker.invalid/p1",
+            "has_related": 0,
+            "fetched_at": "2026-11-20T00:00:00+00:00",
+            "updated_at": "2026-11-20T00:00:00+00:00",
+        }
+
     def iter_visits(self):
         yield Visit(
             source="fake",
@@ -122,6 +148,13 @@ class WebDataTest(unittest.TestCase):
         self.assertIsNotNone(venue)
         self.assertEqual(venue["id"], venues[0]["id"])
         self.assertEqual(venue["visits_count"], 1)
+        details = venue["details"]
+        self.assertEqual(details["tel"], "089 123")
+        self.assertEqual(details["website"], "https://example.invalid")
+        self.assertEqual(details["email"], "info@example.invalid")
+        self.assertEqual(details["social"], {"instagram": "michi"})
+        self.assertEqual(details["categories"], ["Beer Garden", "Restaurant"])
+        self.assertEqual(details["date_refreshed"], "2026-11-20")
         visits = web_data.query_visits(
             self.conn, web_data.Filters(place_id=venue["id"]), limit=10, offset=0
         )

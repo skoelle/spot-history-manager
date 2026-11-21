@@ -37,6 +37,32 @@
             <a href="{{ venue.foursquare_url }}" target="_blank" rel="noopener">Auf Foursquare</a>
             {% endif %}
         </div>
+        {% set details = venue.details %}
+        {% if details %}
+        <div class="venue-facts venue-details-facts">
+            {% if details.formatted_address %}<span>{{ details.formatted_address }}</span>{% endif %}
+            {% if details.tel %}<span><a href="{{ details.tel_link }}">{{ details.tel }}</a></span>{% endif %}
+            {% if details.website %}<span><a href="{{ details.website }}" target="_blank" rel="noopener">Website</a></span>{% endif %}
+            {% if details.email %}<span><a href="mailto:{{ details.email }}">{{ details.email }}</a></span>{% endif %}
+            {% for key, value in details.social.items() %}
+            {% if key == 'facebook_id' %}
+            <a href="https://www.facebook.com/{{ value }}" target="_blank" rel="noopener">Facebook</a>
+            {% elif key == 'instagram' %}
+            <a href="https://www.instagram.com/{{ value }}" target="_blank" rel="noopener">Instagram</a>
+            {% elif key == 'twitter' %}
+            <a href="https://twitter.com/{{ value }}" target="_blank" rel="noopener">Twitter</a>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% if details.categories %}
+        <div class="venue-categories">
+            {% for category in details.categories %}<span class="badge">{{ category }}</span>{% endfor %}
+        </div>
+        {% endif %}
+        {% if details.date_refreshed %}
+        <div class="venue-detail-note">Datenstand: {{ details.date_refreshed }}</div>
+        {% endif %}
+        {% endif %}
     </div>
 
     {% if photos %}

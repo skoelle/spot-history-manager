@@ -438,7 +438,55 @@ VENUE_SELECT = (
 )
 
 
-def _format_venue(row: sqlite3.Row) -> dict:
+def _parse_json(value: str | None):
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _venue_details(
+    conn: sqlite3.Connection, source: str, source_place_id: str | None
+) -> dict:
+    if not source_place_id:
+        return {}
+    try:
+        row = conn.execute(
+            "SELECT * FROM place_details WHERE source = ? AND source_place_id = ?",
+            (source, source_place_id),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return {}
+    if not row:
+        return {}
+    social = _parse_json(row["social_json"]) or {}
+    if not isinstance(social, dict):
+        social = {}
+    social = {key: value for key, value in social.items() if value}
+    categories = _parse_json(row["categories_json"]) or []
+    if not isinstance(categories, list):
+        categories = []
+    website = row["website"]
+    if website and not website.lower().startswith(("http://", "https://")):
+        website = f"https://{website}"
+    tel = row["tel"]
+    return {
+        "tel": tel,
+        "tel_link": "tel:" + tel.replace(" ", "").replace("/", "") if tel else None,
+        "website": website,
+        "email": row["email"],
+        "social": social,
+        "categories": [name for name in categories if name],
+        "formatted_address": row["formatted_address"],
+        "date_refreshed": row["date_refreshed"],
+        "placemaker_url": row["placemaker_url"],
+        "has_related": bool(row["has_related"]),
+    }
+
+
+def _format_venue(row: sqlite3.Row, details: dict | None = None) -> dict:
     first_visit = row["first_visit"]
     last_visit = row["last_visit"]
     source = row["source"]
@@ -471,6 +519,7 @@ def _format_venue(row: sqlite3.Row) -> dict:
             f"https://foursquare.com/v/{row['source_place_id']}"
             if source == "foursquare" and row["source_place_id"] else None
         ),
+        "details": details or {},
     }
 
 
@@ -490,7 +539,10 @@ def get_venue(conn: sqlite3.Connection, place_id: int) -> dict | None:
     row = conn.execute(
         f"{VENUE_SELECT} WHERE p.id = ? GROUP BY p.id", (place_id,)
     ).fetchone()
-    return _format_venue(row) if row else None
+    if not row:
+        return None
+    details = _venue_details(conn, row["source"], row["source_place_id"])
+    return _format_venue(row, details)
 
 
 def build_time(conn: sqlite3.Connection) -> str | None:

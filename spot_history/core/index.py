@@ -90,6 +90,32 @@ CREATE TABLE places (
     UNIQUE(source, source_place_id)
 );
 
+CREATE TABLE place_details (
+    source TEXT NOT NULL,
+    source_place_id TEXT NOT NULL,
+    name TEXT,
+    tel TEXT,
+    website TEXT,
+    email TEXT,
+    social_json TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    country_code TEXT,
+    formatted_address TEXT,
+    lat REAL,
+    lng REAL,
+    categories_json TEXT,
+    date_created TEXT,
+    date_refreshed TEXT,
+    placemaker_url TEXT,
+    has_related INTEGER NOT NULL DEFAULT 0,
+    fetched_at TEXT,
+    updated_at TEXT,
+    PRIMARY KEY(source, source_place_id)
+);
+
 CREATE TABLE visits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
@@ -142,6 +168,7 @@ def build_index(
 
     conn = sqlite3_connect(tmp)
     total_visits = total_photos = feature_count = 0
+    place_details_total = 0
     loaded_sources: list[str] = []
     source_counts: dict[str, int] = {}
     features: list[dict] = []
@@ -180,6 +207,67 @@ def build_index(
                             profile.get("updated_at"),
                         ),
                     )
+            iter_place_details = getattr(connector, "iter_place_details", None)
+            if callable(iter_place_details):
+                try:
+                    details = list(iter_place_details())
+                except Exception as exc:
+                    log(f"Index: {name}: Ortsdetails übersprungen ({exc})")
+                    details = []
+                for detail in details:
+                    source_place_id = detail.get("source_place_id")
+                    if not source_place_id:
+                        continue
+                    conn.execute(
+                        "INSERT INTO place_details (source, source_place_id, name, "
+                        "tel, website, email, social_json, address, city, state, "
+                        "postal_code, country_code, formatted_address, lat, lng, "
+                        "categories_json, date_created, date_refreshed, "
+                        "placemaker_url, has_related, fetched_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        "?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(source, source_place_id) DO UPDATE SET "
+                        "name=excluded.name, tel=excluded.tel, "
+                        "website=excluded.website, email=excluded.email, "
+                        "social_json=excluded.social_json, "
+                        "address=excluded.address, city=excluded.city, "
+                        "state=excluded.state, postal_code=excluded.postal_code, "
+                        "country_code=excluded.country_code, "
+                        "formatted_address=excluded.formatted_address, "
+                        "lat=excluded.lat, lng=excluded.lng, "
+                        "categories_json=excluded.categories_json, "
+                        "date_created=excluded.date_created, "
+                        "date_refreshed=excluded.date_refreshed, "
+                        "placemaker_url=excluded.placemaker_url, "
+                        "has_related=excluded.has_related, "
+                        "fetched_at=excluded.fetched_at, "
+                        "updated_at=excluded.updated_at",
+                        (
+                            name,
+                            source_place_id,
+                            detail.get("name"),
+                            detail.get("tel"),
+                            detail.get("website"),
+                            detail.get("email"),
+                            detail.get("social_json"),
+                            detail.get("address"),
+                            detail.get("city"),
+                            detail.get("state"),
+                            detail.get("postal_code"),
+                            detail.get("country_code"),
+                            detail.get("formatted_address"),
+                            detail.get("lat"),
+                            detail.get("lng"),
+                            detail.get("categories_json"),
+                            detail.get("date_created"),
+                            detail.get("date_refreshed"),
+                            detail.get("placemaker_url"),
+                            detail.get("has_related") or 0,
+                            detail.get("fetched_at"),
+                            detail.get("updated_at"),
+                        ),
+                    )
+                    place_details_total += 1
             visits = list(connector.iter_visits())
             if not visits:
                 log(f"Index: {name}: keine Daten, übersprungen")
@@ -302,12 +390,14 @@ def build_index(
         "visits": total_visits,
         "photos": total_photos,
         "features": feature_count,
+        "place_details": place_details_total,
         "index_db": paths.index_db,
         "geojson": paths.map_geojson,
     }
     log(
         f"Index: {total_visits} Visits, {total_photos} Fotos, "
-        f"{feature_count} Kartenpunkte -> {paths.index_db}"
+        f"{feature_count} Kartenpunkte, {place_details_total} Ortsdetails "
+        f"-> {paths.index_db}"
     )
     return summary
 

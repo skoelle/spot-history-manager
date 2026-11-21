@@ -375,9 +375,7 @@ class ExtrasTest(unittest.TestCase):
         self.assertEqual(
             diagnostics["photos"]["note"], "3 eindeutige API-IDs"
         )
-        self.assertEqual(
-            diagnostics["venue_details"]["note"], "blocked: 402/429, keine Credits"
-        )
+        self.assertEqual(diagnostics["venue_details"]["note"], "kein Import")
 
     def test_extras_continue_after_error(self):
         self.api.fail["photos"] = RuntimeError("kaputt")

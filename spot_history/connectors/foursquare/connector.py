@@ -32,11 +32,17 @@ class FoursquareConnector(BaseConnector):
             ("sync", "inkrementell synchronisieren (Backfill wenn leer)"),
             ("backfill", "komplette Historie (erneut) laden"),
             ("photos", "offene Fotos herunterladen"),
+            ("venue-import", "Places-API-Baseline aus JSON importieren"),
             ("export", "JSON/CSV aus der Datenbank schreiben"),
             ("stats", "Zusammenfassung anzeigen"),
             ("probe", "API-Endpunkte nur lesend prüfen"),
         ):
             sub = commands.add_parser(command, parents=[common], help=help_text)
+            if command == "venue-import":
+                sub.add_argument(
+                    "--file",
+                    help="JSON-Datei (Default: data/foursquare/places_api_venue_details.json)",
+                )
             sub.set_defaults(func=self.run)
 
     def run(self, args: argparse.Namespace) -> int:
@@ -54,11 +60,25 @@ class FoursquareConnector(BaseConnector):
             download_photos=not args.no_photos,
             export=not args.no_export,
             verbose=args.verbose,
+            require_token=args.command != "venue-import",
         )
         config.ensure_dirs()
         db = Database(config.db_path).open()
         try:
             if args.command == "stats":
+                self.print_stats(db)
+                return 0
+            if args.command == "venue-import":
+                from .venue_import import import_venue_details
+
+                source = (
+                    Path(args.file)
+                    if args.file
+                    else config.data_dir / "places_api_venue_details.json"
+                )
+                import_venue_details(db, source)
+                if config.export:
+                    export_all(db, config)
                 self.print_stats(db)
                 return 0
             if args.command == "export":
@@ -213,6 +233,11 @@ class FoursquareConnector(BaseConnector):
         if stats["oldest"]:
             print(f"Zeitraum:         {iso_utc(stats['oldest'])} .. {iso_utc(stats['newest'])}")
         print(f"Venues:           {stats['venues']}")
+        if stats.get("venue_details"):
+            print(
+                f"Venue-Details:    {stats['venue_details']} "
+                f"({stats['venue_contacts']} mit Kontakt)"
+            )
         print(f"Fotos:            {stats['photos_downloaded']}/{stats['photos_total']} geladen")
         if stats["standalone_photos"]:
             print(f"Standalone-Fotos: {stats['standalone_photos']}")
@@ -312,6 +337,51 @@ class FoursquareConnector(BaseConnector):
                     tz_offset=row["time_zone_offset"],
                     photos=photos.get(row["id"], []),
                 )
+        finally:
+            conn.close()
+
+    def iter_place_details(self):
+        from .config import build_config
+
+        config = build_config(require_token=False)
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            return
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT venue_id, name, tel, website, email, social_json, "
+                "address, city, state, postal_code, country_code, "
+                "formatted_address, lat, lng, categories_json, date_created, "
+                "date_refreshed, placemaker_url, has_related, fetched_at, "
+                "updated_at FROM venue_details"
+            )
+            for row in rows:
+                yield {
+                    "source": SOURCE,
+                    "source_place_id": row["venue_id"],
+                    "name": row["name"],
+                    "tel": row["tel"],
+                    "website": row["website"],
+                    "email": row["email"],
+                    "social_json": row["social_json"],
+                    "address": row["address"],
+                    "city": row["city"],
+                    "state": row["state"],
+                    "postal_code": row["postal_code"],
+                    "country_code": row["country_code"],
+                    "formatted_address": row["formatted_address"],
+                    "lat": row["lat"],
+                    "lng": row["lng"],
+                    "categories_json": row["categories_json"],
+                    "date_created": row["date_created"],
+                    "date_refreshed": row["date_refreshed"],
+                    "placemaker_url": row["placemaker_url"],
+                    "has_related": row["has_related"],
+                    "fetched_at": row["fetched_at"],
+                    "updated_at": row["updated_at"],
+                }
         finally:
             conn.close()
 

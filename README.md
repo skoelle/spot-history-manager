@@ -39,6 +39,9 @@ python3 -m spot_history foursquare stats
 # API-Endpunkte nur lesend prüfen (v2 + Places API)
 python3 -m spot_history foursquare probe
 
+# Places-API-Baseline einmalig aus JSON importieren (ohne API-Calls)
+python3 -m spot_history foursquare venue-import
+
 # Alle Quellen in den zentralen Index + GeoJSON überführen
 python3 -m spot_history index build
 
@@ -61,7 +64,8 @@ getrennt davor.
 data/
 ├── foursquare/
 │   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Listen, Tipps, Profil, Sync-Status)
-│   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues (CSV)
+│   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues, venue_details (CSV)
+│   ├── places_api_venue_details.json  Baseline-Dump der Places API (Import-Quelle, gitignored)
 │   ├── profile/               lokales Profilbild
 │   ├── photos/<checkin_id>/   Bilddateien (Standalone unter photos/_standalone/)
 │   └── thumbs/                320-px-Vorschaubilder für die Web-UI
@@ -115,6 +119,7 @@ gedacht.
 - `sources` – welche Quellen enthalten sind
 - `source_profiles` – Anzeigename, Home City, Avatar und Zähler je Quelle
 - `places` – Orte je Quelle (`source`, `source_place_id`)
+- `place_details` – Kontakt, Social-Media, Kategorien und Datenstand je Ort
 - `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
 - `photos` – Fotometadaten + lokaler Pfad
 - `index_meta` – Build-Zeitpunkt
@@ -152,7 +157,17 @@ lokalen Fotopfaden. Das reicht für Leaflet/MapLibre mit OSM-Tiles.
   liefert dagegen für **alle 1036 Venues** Baseline-Details (200): aktueller
   Name, Adresse, Stadt/Region/PLZ/Land, Koordinaten, Kategorien, Telefon (747),
   Website (748), E-Mail (395) und Social-Media-IDs. Der Client liegt in
-  `places_api.py`; gespeichert wird davon noch nichts.
+  `places_api.py`.
+- Die Baseline wurde einmalig in `data/foursquare/places_api_venue_details.json`
+  gesichert und mit `foursquare venue-import` in die Tabelle `venue_details`
+  importiert (1036 Einträge, 811 mit Kontakt). Der Import ist idempotent, macht
+  keine API-Calls und überschreibt keine bestehenden Venue-Snapshots.
+- Die Detailseite `/venues/{id}` zeigt daraus Telefon, Website, E-Mail,
+  Social-Links, alle Kategorien und den Datenstand; leere Felder werden
+  ausgeblendet.
+- Hinweis zum Kontingent: Der einmalige Abruf aller 1036 Venues hat das
+  freePro-Kontingent aufgebraucht; weitere Detail-Calls liefern bis zum
+  Reset/Credits 429. Der Import aus JSON verbraucht kein Kontingent.
 - `places/search`, `autocomplete`, `places/match` und
   `geotagging/candidates` antworten mit 200, `places/resolve` mit 401
   (fehlende Berechtigung).
