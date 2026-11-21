@@ -133,7 +133,7 @@ class YelpImportTest(unittest.TestCase):
         old = next(visit for visit in visits if visit.place_name == "Alte Bäckerei")
         self.assertIsNone(old.lat)
         self.assertIsNone(old.lng)
-        self.assertEqual(old.tz_offset, 0)
+        self.assertIsNone(old.tz_offset)
         self.assertFalse(old.extra["has_coords"])
         self.assertEqual(old.source_place_id, place_key("Alte Bäckerei"))
 

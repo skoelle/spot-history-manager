@@ -251,6 +251,10 @@ python3 -m spot_history yelp stats
 - 16 Yelp-Orte haben aus Lesezeichen/Sammlungen eine Business-URL; sie wird
   beim Import in `places.place_url` gespeichert und als Quell-Link in den Index
   übernommen
+- Das Yelp-`Datum` ist UTC; der Export enthält keinen Orts-Offset. In
+  `yelp.db` bleibt `tz_offset` deshalb `NULL`. Der Index löst die Lokalzeit auf
+  (gleicher Ort, Orts-Zeitzone, Stadt/Land, Umfeld-Mehrheit oder naher
+  Foursquare-Check-in); aktuell sind alle 462 Yelp-Visits aufgelöst.
 - 135 Yelp-Kartenpunkte: 92 mit Quellkoordinaten, 43 über den Ort abgeleitet
   (Badge „Ort abgeleitet“ in Liste und Karte)
 - 316 von 462 Visits mit Stadt: 135 über Nominatim, 181 über exakte

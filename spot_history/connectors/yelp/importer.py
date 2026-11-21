@@ -99,7 +99,7 @@ def parse_checkins(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
         if parsed_date is None or not name:
             warnings.append("check_in.html: Zeile ohne Datum oder Namen übersprungen")
             continue
-        timestamp, offset, iso_timestamp = parsed_date
+        timestamp, _, iso_timestamp = parsed_date
         lng = parse_float(_text(row, "Längengrad"))
         lat = parse_float(_text(row, "Breitengrad"))
         result.append(
@@ -107,7 +107,7 @@ def parse_checkins(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
                 "id": visit_id(name, iso_timestamp, lat, lng),
                 "visited_at": timestamp,
                 "visited_at_iso": iso_timestamp,
-                "tz_offset": offset,
+                "tz_offset": None,
                 "place_key": place_key(name),
                 "place_name": name,
                 "lat": lat,

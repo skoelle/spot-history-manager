@@ -11,6 +11,7 @@ from .places import (
     load_rules,
     resolve_canonical_places,
 )
+from .timezones import apply_timezone_offsets
 
 
 def iso_utc(timestamp: int) -> str:
@@ -374,6 +375,7 @@ def build_index(
             "single": "high",
         }
         canonical_ids: dict[tuple[str, str], int] = {}
+        canonical_by_id: dict[int, object] = {}
         link_total = 0
         for canonical in canonical_places:
             lat, lng = canonical.coords
@@ -399,6 +401,7 @@ def build_index(
                 ),
             )
             canonical_id = int(cursor.lastrowid)
+            canonical_by_id[canonical_id] = canonical
             for member in canonical.members:
                 method = canonical.methods.get(member.key, "single")
                 conn.execute(
@@ -437,6 +440,10 @@ def build_index(
                     candidate.city,
                 ),
             )
+
+        timezone_summary = apply_timezone_offsets(
+            all_visits, canonical_ids, canonical_by_id, log=log
+        )
 
         for visit in all_visits:
             key = (visit.source, visit.source_place_id) if visit.source_place_id else None
@@ -548,6 +555,7 @@ def build_index(
         "canonical_places": len(canonical_places),
         "place_links": link_total,
         "merge_candidates": len(candidates),
+        "timezones": timezone_summary,
         "index_db": paths.index_db,
         "geojson": paths.map_geojson,
     }

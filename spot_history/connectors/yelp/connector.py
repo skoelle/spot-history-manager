@@ -198,7 +198,7 @@ class YelpConnector(BaseConnector):
                     )
                 )
             rows = conn.execute(
-                "SELECT c.id, c.visited_at, c.tz_offset, c.place_key, c.place_name, "
+                "SELECT c.id, c.visited_at, c.place_key, c.place_name, "
                 "c.lat, c.lng, c.note, c.status, "
                 f"p.city, p.state, p.country_code, {place_url_column} FROM checkins c "
                 "LEFT JOIN places p ON p.place_key = c.place_key "
@@ -220,7 +220,7 @@ class YelpConnector(BaseConnector):
                     note=row["note"],
                     source_url=row["place_url"],
                     place_url=row["place_url"],
-                    tz_offset=row["tz_offset"],
+                    tz_offset=None,
                     photos=photos.get(row["id"], []),
                     extra={"status": row["status"], "has_coords": has_coords},
                 )

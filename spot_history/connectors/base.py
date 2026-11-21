@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Visit:
     source_url: str | None = None
     place_url: str | None = None
     tz_offset: int | None = None
+    time_zone: str | None = None
     photos: list[Photo] = field(default_factory=list)
     extra: dict[str, Any] | None = None
 

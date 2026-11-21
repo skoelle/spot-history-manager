@@ -69,7 +69,8 @@ class BaseConnector:
 | `note` | nein | Kommentar/Notiz |
 | `source_url` | nein | Link zum Besuch/Original |
 | `place_url` | nein | Link zur Ortsseite in der Quelle (z. B. Venue/Business) |
-| `tz_offset` | nein | Minuten Offset zu UTC |
+| `tz_offset` | nein | Minuten Offset zu UTC; `None`, wenn die Quelle ihn nicht liefert |
+| `time_zone` | nein | IANA-Zeitzone (z. B. `Europe/Berlin`) für die Auflösung |
 | `photos` | nein | Liste von `Photo` |
 | `extra` | nein | quellenspezifische Zusatzfelder (JSON) |
 
@@ -100,9 +101,11 @@ Ein Import darf wiederholbar sein: gleiche IDs per Upsert, keine Duplikate.
 3. führt Orte konservativ über normalisierten Namen, Koordinaten (≤ 50 m) oder
    Name + eindeutige Stadt zusammen; manuelle Regeln aus
    `data/places/place_rules.db` haben Vorrang,
-4. schreibt `data/index/index.db` neu (`canonical_places`, `place_links`,
+4. löst fehlende `tz_offset` auf (gleicher Ort, Orts-Zeitzone, Stadt/Land,
+   Umfeld-Mehrheit oder naher Foursquare-Check-in),
+5. schreibt `data/index/index.db` neu (`canonical_places`, `place_links`,
    `merge_candidates`, Visits mit `canonical_place_id`),
-5. schreibt `data/exports/visits.geojson` (Punkte mit `[lng, lat]`).
+6. schreibt `data/exports/visits.geojson` (Punkte mit `[lng, lat]`).
 
 Der Index enthält nur kanonische Felder. Rohdaten und Sonderfälle bleiben in der
 Quell-DB. Die Regel-DB ist persistent und gehört nicht in den wegwerfbaren

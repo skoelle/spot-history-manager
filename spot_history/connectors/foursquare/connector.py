@@ -315,7 +315,7 @@ class FoursquareConnector(BaseConnector):
             rows = conn.execute(
                 "SELECT id, created_at, lat, lng, venue_id, venue_name, category_name, "
                 "address, city, state, postal_code, country_code, shout, canonical_url, "
-                "time_zone_offset FROM checkins ORDER BY created_at"
+                "time_zone_offset, time_zone FROM checkins ORDER BY created_at"
             )
             for row in rows:
                 yield Visit(
@@ -339,6 +339,7 @@ class FoursquareConnector(BaseConnector):
                         if row["venue_id"] else None
                     ),
                     tz_offset=row["time_zone_offset"],
+                    time_zone=row["time_zone"],
                     photos=photos.get(row["id"], []),
                 )
         finally:
