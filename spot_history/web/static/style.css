@@ -802,17 +802,29 @@ button:hover,
     }
 
     .visit-card {
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 0.4rem 1rem;
+        align-items: start;
     }
 
     .visit-date {
+        grid-column: 1;
+        padding-right: 0;
         border-right: none;
     }
 
+    .visit-body {
+        grid-column: 2;
+    }
+
     .visit-meta {
+        grid-column: 1 / -1;
         flex-direction: row;
+        flex-wrap: wrap;
         align-items: center;
-        margin-left: calc(56px + 1rem);
+        gap: 0.3rem;
+        margin-left: 0;
     }
 
     #map {
