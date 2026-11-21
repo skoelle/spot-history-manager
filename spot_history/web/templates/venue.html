@@ -108,7 +108,9 @@
                 <input type="hidden" name="osm" value="{{ candidate.osm_type }}/{{ candidate.osm_id }}">
                 <span class="osm-candidate-name">
                     <strong>{{ candidate.osm_name or 'Unbekannt' }}</strong>
-                    · {{ candidate.osm_type }}/{{ candidate.osm_id }}
+                    ·
+                    <a href="https://www.openstreetmap.org/{{ candidate.osm_type }}/{{ candidate.osm_id }}"
+                       target="_blank" rel="noopener">{{ candidate.osm_type }}/{{ candidate.osm_id }}</a>
                 </span>
                 <span class="muted">
                     {% if candidate.score is not none %}Score {{ "%.2f"|format(candidate.score) }}{% endif %}
