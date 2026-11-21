@@ -819,16 +819,6 @@ button:hover,
         height: 320px;
     }
 
-    .venue-top {
-        grid-template-columns: 1fr;
-    }
-
-    .venue-top .venue-map {
-        flex: none;
-        height: 260px;
-        min-height: 260px;
-    }
-
     .header {
         align-items: flex-start;
     }
@@ -1271,5 +1261,17 @@ button:hover,
 @media (max-width: 960px) {
     .venue-layout {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 800px) {
+    .venue-top {
+        grid-template-columns: 1fr;
+    }
+
+    .venue-top .venue-map {
+        flex: none;
+        height: 260px;
+        min-height: 260px;
     }
 }
