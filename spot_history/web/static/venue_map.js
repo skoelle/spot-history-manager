@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
+// Licensed under the MIT License. See LICENSE file in project root for details.
 (() => {
     const elements = document.querySelectorAll("[data-map-lat][data-map-lng]");
     if (!elements.length || typeof L === "undefined") {

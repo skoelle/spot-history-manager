@@ -517,3 +517,7 @@ python3 -m unittest discover -s tests
 - Der Google-Timeline-Export bleibt manuell (iOS-Share-Sheet); `google.sh`
   übernimmt danach Import, OSM-Anreicherung und Index-Rebuild.
 - Kein Cron/Daemon: Sync und Index werden manuell aufgerufen.
+
+## License
+
+Licensed under the [MIT License](LICENSE) - Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
