@@ -9,6 +9,8 @@ from pathlib import Path
 from ..core.categories import GROUP_RANK
 from ..core.config import ROOT
 from ..core.media import is_video, thumb_relpath
+from ..core.naming import name_similarity
+from ..core.places import haversine_m
 
 PAGE_SIZE = 60
 PHOTO_PAGE_SIZE = 48
@@ -611,6 +613,81 @@ def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
     ).fetchone()
     return int(row["n"] or 0)
 
+
+def _venue_coords(row: sqlite3.Row) -> tuple[float, float] | None:
+    lat = row["osm_lat"] if row["osm_lat"] is not None else row["lat"]
+    lng = row["osm_lng"] if row["osm_lng"] is not None else row["lng"]
+    if lat is None or lng is None:
+        return None
+    return float(lat), float(lng)
+
+
+def nearby_venues(
+    conn: sqlite3.Connection,
+    place_id: int,
+    *,
+    radius_m: float = 50.0,
+    limit: int = 8,
+    min_similarity: float = 0.45,
+) -> list[dict]:
+    current = conn.execute(
+        "SELECT id, name, lat, lng, osm_lat, osm_lng FROM canonical_places "
+        "WHERE id = ?",
+        (place_id,),
+    ).fetchone()
+    if current is None:
+        return []
+    coords = _venue_coords(current)
+    if coords is None:
+        return []
+    lat, lng = coords
+    rows = conn.execute(
+        "SELECT id, canonical_key, name, lat, lng, osm_lat, osm_lng, "
+        "sources_json, match_status FROM canonical_places WHERE id != ?",
+        (place_id,),
+    ).fetchall()
+    candidates: list[dict] = []
+    for row in rows:
+        other = _venue_coords(row)
+        if other is None:
+            continue
+        distance = haversine_m(lat, lng, other[0], other[1])
+        if distance > radius_m:
+            continue
+        similarity = name_similarity(current["name"], row["name"])
+        if similarity < min_similarity:
+            continue
+        try:
+            sources = sorted(json.loads(row["sources_json"]) or [])
+        except (TypeError, ValueError):
+            sources = []
+        candidates.append(
+            {
+                "id": row["id"],
+                "key": row["canonical_key"],
+                "name": row["name"],
+                "sources": sources,
+                "match_status": row["match_status"],
+                "distance_m": round(distance, 1),
+                "similarity": similarity,
+            }
+        )
+    candidates.sort(
+        key=lambda item: (-item["similarity"], item["distance_m"], item["key"])
+    )
+    return candidates[:limit]
+
+
+def venue_source_ref(conn: sqlite3.Connection, place_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT source, source_place_id FROM place_links WHERE canonical_id = ? "
+        "ORDER BY CASE source WHEN 'foursquare' THEN 0 WHEN 'yelp' THEN 1 "
+        "ELSE 2 END, source, source_place_id LIMIT 1",
+        (place_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"source": row["source"], "source_place_id": row["source_place_id"]}
 
 VENUE_SELECT = (
     "SELECT p.id, p.canonical_key, p.primary_source AS source, p.name, "

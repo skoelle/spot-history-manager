@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from ..connectors import discover
 from ..connectors.osm import db as osm_db
 from ..core import identity
+from ..core import places as place_core
 from ..core.config import build_paths
 from ..core.index import build_index
 from . import data as web_data
@@ -410,6 +411,7 @@ def venue_detail(
         )
         photos = web_data.photos_for_place(conn, place_id, limit=24)
         members = web_data.venue_members(conn, place_id)
+        merge_candidates = web_data.nearby_venues(conn, place_id)
     finally:
         conn.close()
     member_keys = {
@@ -459,6 +461,7 @@ def venue_detail(
             ),
             "profile": profile,
             "members": members,
+            "merge_candidates": merge_candidates,
             "osm_candidates": osm_candidates,
             "venue_map": venue_map,
             "assign_error": assign_error,
@@ -555,6 +558,122 @@ async def clear_venue_osm(request: Request, key: str) -> RedirectResponse:
         return _redirect_venue(venue["key"], assign_error="Ort nach Rebuild nicht gefunden.")
     message = "Zuordnung entfernt." if removed else "Keine Zuordnung vorhanden."
     return _redirect_venue(updated["key"], assign_ok=message)
+
+
+@app.post("/venues/{key}/merge")
+async def merge_venue(request: Request, key: str) -> RedirectResponse:
+    _check_same_origin(request)
+    target_key = await _form_value(request, "target")
+    index_db = paths.index_db
+    if not index_db.exists():
+        raise HTTPException(status_code=503, detail="Index missing")
+    conn = web_data.connect(index_db)
+    try:
+        venue = web_data.get_venue_by_key(conn, key)
+        if not venue:
+            raise HTTPException(status_code=404, detail="Venue not found")
+        target = web_data.get_venue_by_key(conn, target_key) if target_key else None
+        current_ref = web_data.venue_source_ref(conn, venue["id"])
+        target_ref = (
+            web_data.venue_source_ref(conn, target["id"]) if target else None
+        )
+    finally:
+        conn.close()
+    if target is None:
+        return _redirect_venue(
+            venue["key"], assign_error="Ziel-Ort nicht gefunden."
+        )
+    if target["id"] == venue["id"]:
+        return _redirect_venue(
+            venue["key"], assign_error="Orte sind bereits zusammengeführt."
+        )
+    if current_ref is None or target_ref is None:
+        return _redirect_venue(
+            venue["key"], assign_error="Kein Quell-Ort für die Zusammenführung."
+        )
+    place_core.upsert_rule(
+        paths.place_rules_db,
+        place_core.PlaceRule(
+            source=current_ref["source"],
+            source_place_id=current_ref["source_place_id"],
+            action="merge",
+            target_source=target_ref["source"],
+            target_source_place_id=target_ref["source_place_id"],
+            note="web",
+        ),
+    )
+    try:
+        _rebuild_index()
+    except Exception as exc:  # noqa: BLE001 - Fehler im UI anzeigen
+        return _redirect_venue(
+            venue["key"], assign_error=f"Index-Rebuild fehlgeschlagen: {exc}"
+        )
+    updated = _venue_after_rebuild(index_db, venue["key"], venue["links"])
+    if not updated:
+        return _redirect_venue(
+            venue["key"], assign_error="Ort nach Rebuild nicht gefunden."
+        )
+    return _redirect_venue(
+        updated["key"], assign_ok=f"Zusammengeführt mit {target['name'] or target['key']}."
+    )
+
+
+@app.post("/venues/{key}/unmerge")
+async def unmerge_venue(request: Request, key: str) -> RedirectResponse:
+    _check_same_origin(request)
+    raw = await _form_value(request, "place")
+    index_db = paths.index_db
+    if not index_db.exists():
+        raise HTTPException(status_code=503, detail="Index missing")
+    conn = web_data.connect(index_db)
+    try:
+        venue = web_data.get_venue_by_key(conn, key)
+        if not venue:
+            raise HTTPException(status_code=404, detail="Venue not found")
+        members = web_data.venue_members(conn, venue["id"])
+    finally:
+        conn.close()
+    try:
+        source, source_place_id = place_core.parse_place_ref(raw)
+    except ValueError as exc:
+        return _redirect_venue(venue["key"], assign_error=str(exc))
+    if not any(
+        member["source"] == source
+        and member["source_place_id"] == source_place_id
+        for member in members
+    ):
+        return _redirect_venue(
+            venue["key"], assign_error="Quell-Ort gehört nicht zu diesem Ort."
+        )
+    place_core.upsert_rule(
+        paths.place_rules_db,
+        place_core.PlaceRule(
+            source=source,
+            source_place_id=source_place_id,
+            action="standalone",
+            note="web",
+        ),
+    )
+    try:
+        _rebuild_index()
+    except Exception as exc:  # noqa: BLE001 - Fehler im UI anzeigen
+        return _redirect_venue(
+            venue["key"], assign_error=f"Index-Rebuild fehlgeschlagen: {exc}"
+        )
+    remaining = [
+        member
+        for member in members
+        if not (
+            member["source"] == source
+            and member["source_place_id"] == source_place_id
+        )
+    ]
+    updated = _venue_after_rebuild(index_db, venue["key"], remaining)
+    if not updated:
+        return _redirect_venue(
+            venue["key"], assign_error="Ort nach Rebuild nicht gefunden."
+        )
+    return _redirect_venue(updated["key"], assign_ok="Ort getrennt.")
 
 
 @app.get("/aktivitaet", response_class=HTMLResponse)

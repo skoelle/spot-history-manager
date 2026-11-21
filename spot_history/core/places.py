@@ -9,12 +9,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .categories import resolve_category_group
+from .categories import UNKNOWN_GROUP, resolve_category_group
 from .identity import OsmAssignment, osm_key, validate_osm
 from .identity import local_key as build_local_key
+from .naming import name_similarity
 
 SOURCE_PRIORITY = ("foursquare", "yelp")
 MATCH_DISTANCE_M = 50.0
+FUZZY_DISTANCE_M = 25.0
+FUZZY_AUTO_SIMILARITY = 0.9
+FUZZY_CANDIDATE_SIMILARITY = 0.78
+OSM_CONFLICT_CANDIDATE_DISTANCE_M = 250.0
 
 RULES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS place_rules (
@@ -68,6 +73,49 @@ def source_rank(source: str) -> int:
         return len(SOURCE_PRIORITY)
 
 
+def _category_compatible(first: SourcePlace, second: SourcePlace) -> bool:
+    first_group, _ = resolve_category_group(first.category, first.name)
+    second_group, _ = resolve_category_group(second.category, second.name)
+    if first_group == UNKNOWN_GROUP or second_group == UNKNOWN_GROUP:
+        return True
+    return first_group == second_group
+
+
+def _near_pairs(
+    places: Iterable[SourcePlace], max_distance_m: float
+) -> Iterable[tuple[SourcePlace, SourcePlace, float]]:
+    step = max(0.001, max_distance_m / 80000)
+    buckets: dict[tuple[int, int], list[SourcePlace]] = {}
+    for place in places:
+        if not place.has_coords:
+            continue
+        key = (
+            math.floor(place.lat / step),
+            math.floor(place.lng / step),
+        )
+        buckets.setdefault(key, []).append(place)
+    seen: set[tuple[tuple[str, str], tuple[str, str]]] = set()
+    for place in places:
+        if not place.has_coords:
+            continue
+        key_lat = math.floor(place.lat / step)
+        key_lng = math.floor(place.lng / step)
+        for offset_lat in (-1, 0, 1):
+            for offset_lng in (-1, 0, 1):
+                for other in buckets.get(
+                    (key_lat + offset_lat, key_lng + offset_lng), []
+                ):
+                    if other.key <= place.key:
+                        continue
+                    pair = (place.key, other.key)
+                    if pair in seen:
+                        continue
+                    seen.add(pair)
+                    distance = haversine_m(
+                        place.lat, place.lng, other.lat, other.lng
+                    )
+                    if distance <= max_distance_m:
+                        yield place, other, distance
 def place_ref(source: str, source_place_id: str) -> str:
     return f"{source}:{source_place_id}"
 
@@ -439,6 +487,43 @@ def resolve_canonical_places(
             ),
         )
 
+    def dedupe_near_edges(
+        edges: list[tuple[SourcePlace, SourcePlace, float]],
+    ) -> list[tuple[SourcePlace, SourcePlace, float]]:
+        grouped: dict[
+            tuple[tuple[str, str], tuple[str, str]],
+            tuple[SourcePlace, SourcePlace, float],
+        ] = {}
+        for first, second, distance in edges:
+            roots = tuple(sorted((union.find(first.key), union.find(second.key))))
+            if roots[0] == roots[1]:
+                continue
+            current = grouped.get(roots)
+            if current is None or distance < current[2]:
+                grouped[roots] = (first, second, distance)
+        return list(grouped.values())
+
+    def dedupe_city_edges(
+        edges: list[tuple[SourcePlace, SourcePlace, str]],
+    ) -> list[tuple[SourcePlace, SourcePlace, str]]:
+        grouped: dict[
+            tuple[tuple[str, str], tuple[str, str]],
+            tuple[SourcePlace, SourcePlace, str],
+        ] = {}
+        for first, second, city in edges:
+            roots = tuple(sorted((union.find(first.key), union.find(second.key))))
+            if roots[0] == roots[1]:
+                continue
+            grouped.setdefault(roots, (first, second, city))
+        return list(grouped.values())
+
+    def edge_degree(edges: list[tuple[SourcePlace, SourcePlace, Any]]) -> dict:
+        counts: dict[tuple[str, str], int] = {}
+        for first, second, *_ in edges:
+            for key in (union.find(first.key), union.find(second.key)):
+                counts[key] = counts.get(key, 0) + 1
+        return counts
+
     for group in name_groups.values():
         near_edges: list[tuple[SourcePlace, SourcePlace, float]] = []
         city_edges: list[tuple[SourcePlace, SourcePlace, str]] = []
@@ -454,14 +539,18 @@ def resolve_canonical_places(
                         if first.has_coords and second.has_coords
                         else None
                     )
-                    add_candidate(
-                        first,
-                        second,
-                        "osm_conflict",
-                        "high",
-                        distance,
-                        first.city or second.city,
-                    )
+                    if (
+                        distance is None
+                        or distance <= OSM_CONFLICT_CANDIDATE_DISTANCE_M
+                    ):
+                        add_candidate(
+                            first,
+                            second,
+                            "osm_conflict",
+                            "high",
+                            distance,
+                            first.city or second.city,
+                        )
                     continue
                 first_city = normalize_name(first.city)
                 second_city = normalize_name(second.city)
@@ -482,11 +571,13 @@ def resolve_canonical_places(
                 if first_city and first_city == second_city:
                     city_edges.append((first, second, first.city or second.city))
 
-        def degree(items: list[tuple[SourcePlace, SourcePlace, Any]], place) -> int:
-            return sum(1 for a, b, _ in items if a.key == place.key or b.key == place.key)
-
+        near_edges = dedupe_near_edges(near_edges)
+        near_degree = edge_degree(near_edges)
         for first, second, distance in near_edges:
-            if degree(near_edges, first) == 1 and degree(near_edges, second) == 1:
+            roots = (union.find(first.key), union.find(second.key))
+            if roots[0] == roots[1]:
+                continue
+            if near_degree.get(roots[0]) == 1 and near_degree.get(roots[1]) == 1:
                 union.union(first.key, second.key)
                 methods.setdefault(first.key, "name_coords")
                 methods.setdefault(second.key, "name_coords")
@@ -495,8 +586,13 @@ def resolve_canonical_places(
                     first, second, "name_coords_ambiguous", "medium", distance, None
                 )
 
+        city_edges = dedupe_city_edges(city_edges)
+        city_degree = edge_degree(city_edges)
         for first, second, city in city_edges:
-            if degree(city_edges, first) == 1 and degree(city_edges, second) == 1:
+            roots = (union.find(first.key), union.find(second.key))
+            if roots[0] == roots[1]:
+                continue
+            if city_degree.get(roots[0]) == 1 and city_degree.get(roots[1]) == 1:
                 union.union(first.key, second.key)
                 methods.setdefault(first.key, "name_city")
                 methods.setdefault(second.key, "name_city")
@@ -522,6 +618,73 @@ def resolve_canonical_places(
                 union.union(first.key, second.key)
                 methods.setdefault(first.key, "name_unique")
                 methods.setdefault(second.key, "name_unique")
+
+    fuzzy_edges: list[tuple[SourcePlace, SourcePlace, float, float]] = []
+    fuzzy_places = [
+        place for place in places.values() if place.key not in standalone
+    ]
+    for first, second, distance in _near_pairs(fuzzy_places, FUZZY_DISTANCE_M):
+        if first.source == second.source:
+            continue
+        if union.find(first.key) == union.find(second.key):
+            continue
+        similarity = name_similarity(first.name, second.name)
+        if similarity < FUZZY_CANDIDATE_SIMILARITY:
+            continue
+        if osm_conflict(first, second):
+            add_candidate(
+                first,
+                second,
+                "osm_conflict",
+                "high",
+                distance,
+                first.city or second.city,
+            )
+            continue
+        compatible = _category_compatible(first, second)
+        if similarity >= FUZZY_AUTO_SIMILARITY and (
+            compatible or similarity >= 0.97
+        ):
+            fuzzy_edges.append((first, second, distance, similarity))
+        else:
+            add_candidate(
+                first,
+                second,
+                "name_fuzzy_coords",
+                "medium" if compatible else "low",
+                distance,
+                first.city or second.city,
+            )
+
+    fuzzy_groups: dict[
+        tuple[tuple[str, str], tuple[str, str]],
+        tuple[SourcePlace, SourcePlace, float, float],
+    ] = {}
+    for first, second, distance, similarity in fuzzy_edges:
+        roots = tuple(sorted((union.find(first.key), union.find(second.key))))
+        if roots[0] == roots[1]:
+            continue
+        current = fuzzy_groups.get(roots)
+        if current is None or (similarity, -distance) > (current[3], -current[2]):
+            fuzzy_groups[roots] = (first, second, distance, similarity)
+    fuzzy_degree: dict[tuple[str, str], int] = {}
+    for roots in fuzzy_groups:
+        for root in roots:
+            fuzzy_degree[root] = fuzzy_degree.get(root, 0) + 1
+    for roots, (first, second, distance, _) in fuzzy_groups.items():
+        if fuzzy_degree.get(roots[0]) == 1 and fuzzy_degree.get(roots[1]) == 1:
+            union.union(first.key, second.key)
+            methods.setdefault(first.key, "name_fuzzy_coords")
+            methods.setdefault(second.key, "name_fuzzy_coords")
+        else:
+            add_candidate(
+                first,
+                second,
+                "name_fuzzy_coords_ambiguous",
+                "medium",
+                distance,
+                first.city or second.city,
+            )
 
     canonical: list[CanonicalPlace] = []
     for keys in union.groups().values():

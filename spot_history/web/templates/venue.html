@@ -273,6 +273,52 @@
     </div>
     {% endif %}
 
+    {% if merge_candidates or members|length > 1 %}
+    <div class="box merge-panel">
+        <div class="box-title">Ort zusammenführen</div>
+        {% if members|length > 1 %}
+        <div class="merge-members">
+            <div class="merge-candidates-title">Aktuell zusammengeführt</div>
+            {% for member in members %}
+            <div class="merge-candidate">
+                <span class="merge-candidate-name">
+                    <span class="badge source-{{ member.source }}">{{ member.source }}</span>
+                    {{ member.name or member.source_place_id }}
+                </span>
+                <form method="post" action="/venues/{{ venue.key }}/unmerge"
+                      onsubmit="return confirm('Diesen Quell-Ort wieder trennen?');">
+                    <input type="hidden" name="place" value="{{ member.source }}:{{ member.source_place_id }}">
+                    <button type="submit" class="button danger">Trennen</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if merge_candidates %}
+        <div class="merge-candidates">
+            <div class="merge-candidates-title">Nahe Orte</div>
+            {% for candidate in merge_candidates %}
+            <form class="merge-candidate" method="post" action="/venues/{{ venue.key }}/merge">
+                <input type="hidden" name="target" value="{{ candidate.key }}">
+                <span class="merge-candidate-name">
+                    <strong>{{ candidate.name or 'Unbenannt' }}</strong>
+                    {% for source in candidate.sources %}
+                    <span class="badge source-{{ source }}">{{ source }}</span>
+                    {% endfor %}
+                </span>
+                <span class="muted">
+                    {{ "%.0f"|format(candidate.distance_m) }} m ·
+                    Ähnlichkeit {{ "%.2f"|format(candidate.similarity) }}
+                    {% if candidate.match_status == 'osm' %} · OSM{% endif %}
+                </span>
+                <button type="submit">Zusammenführen</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if photos %}
     <div class="box photo-box">
         <div class="box-title">Fotos · {{ photos|length }}</div>

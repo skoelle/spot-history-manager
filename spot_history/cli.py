@@ -7,6 +7,7 @@ import sqlite3
 import sys
 
 from .connectors import discover
+from .core import audit as place_audit
 from .core import identity
 from .core import places as place_core
 from .core.config import build_paths
@@ -60,6 +61,8 @@ def _run_places(args: argparse.Namespace, connectors) -> int:
         return _run_osm_accept(args, paths, connectors)
     if command == "unmatched":
         return _run_unmatched(args, paths)
+    if command == "audit":
+        return _run_place_audit(args, paths)
     if command == "merge":
         try:
             source_a, place_a = place_core.parse_place_ref(args.first)
@@ -165,6 +168,61 @@ def _run_place_candidates(args: argparse.Namespace, paths) -> int:
             f"{row['name_b']}  [{row['reason']}, {row['confidence']}, "
             f"{distance}, {city}]"
         )
+    return 0
+
+
+def _run_place_audit(args: argparse.Namespace, paths) -> int:
+    try:
+        summary, matches = place_audit.audit_index(
+            paths.index_db,
+            source=args.source,
+            radius_m=args.radius,
+            min_similarity=args.min_similarity,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "summary": summary.as_dict(),
+                    "matches": [match.as_dict() for match in matches],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(
+        f"Audit {summary.source}: {summary.source_only} Orts-Gruppen nur aus "
+        f"dieser Quelle, {summary.duplicates} Verdachtsfälle "
+        f"({summary.within_25m} <=25 m, {summary.within_50m} <=50 m)"
+    )
+    if summary.duplicates == 0:
+        return 0
+    labels = {"exact": "exakt", "variant": "Variante", "weak": "schwach"}
+    classification = ", ".join(
+        f"{labels.get(key, key)}: {value}"
+        for key, value in sorted(summary.by_classification.items())
+    )
+    reasons = ", ".join(
+        f"{key}: {value}" for key, value in sorted(summary.by_reason.items())
+    )
+    print(f"  Kategorie: {classification}")
+    print(f"  Ursache:   {reasons}")
+    limit = args.limit if args.limit is not None else len(matches)
+    for match in matches[:limit]:
+        print(
+            f"  {match.distance_m:5.1f} m  sim {match.similarity:.2f}  "
+            f"[{match.classification}/{match.reason}]\n"
+            f"    {'/'.join(match.place.sources)}:"
+            f"{match.place.canonical_key}  {match.place.name!r}\n"
+            f"    <-> {'/'.join(match.other.sources)}:"
+            f"{match.other.canonical_key}  {match.other.name!r}"
+        )
+    if limit < len(matches):
+        print(f"  ... {len(matches) - limit} weitere (--limit erhöhen)")
     return 0
 
 
@@ -531,6 +589,26 @@ def main(argv: list[str] | None = None) -> int:
     unmatched_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
     unmatched_parser.add_argument("--json", action="store_true")
     unmatched_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    audit_parser = place_commands.add_parser(
+        "audit", help="verdächtige, noch nicht gemergte Orts-Duplikate anzeigen"
+    )
+    audit_parser.add_argument(
+        "--source", default="google", help="nur Orte dieser Quelle prüfen"
+    )
+    audit_parser.add_argument(
+        "--radius", type=float, default=50.0, help="Suchradius in Metern"
+    )
+    audit_parser.add_argument(
+        "--min-similarity",
+        type=float,
+        default=0.78,
+        help="minimale Namens-Ähnlichkeit",
+    )
+    audit_parser.add_argument("--limit", type=int, help="maximale Anzahl Paare")
+    audit_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    audit_parser.add_argument("--json", action="store_true")
+    audit_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     web_parser = subparsers.add_parser("web", help="Web-Oberfläche starten")
     web_parser.add_argument("--host", default="0.0.0.0")

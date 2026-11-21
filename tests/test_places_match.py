@@ -244,6 +244,55 @@ class PlacesMatchTest(unittest.TestCase):
             {"osm-node-1", "osm-node-2"},
         )
 
+    def test_far_osm_conflict_is_not_a_candidate(self):
+        places = [
+            place("foursquare", "v1", "McDonald's", 48.1, 11.5, osm_type="node", osm_id=1),
+            place("google", "g1", "McDonald's", 48.2, 11.6, osm_type="node", osm_id=2),
+        ]
+        canonical, candidates = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 2)
+        self.assertEqual(candidates, [])
+
+    def test_fuzzy_name_variants_merge(self):
+        places = [
+            place("foursquare", "v1", "L’Osteria", 48.1, 11.5),
+            place("google", "g1", "L'Osteria", 48.10001, 11.50001),
+            place("foursquare", "v2", "Steinheil 16", 48.2, 11.6),
+            place("google", "g2", "Steinheil Sechzehn", 48.20001, 11.60001),
+            place("foursquare", "v3", "Aumeister", 48.3, 11.7),
+            place("yelp", "y3", "Wirtshaus Aumeister", 48.30001, 11.70001),
+        ]
+        canonical, candidates = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 3)
+        self.assertEqual(candidates, [])
+        methods = {
+            key: method
+            for item in canonical
+            for key, method in item.methods.items()
+        }
+        self.assertEqual(methods[("google", "g1")], "name_fuzzy_coords")
+        self.assertEqual(methods[("google", "g2")], "name_fuzzy_coords")
+        self.assertEqual(methods[("yelp", "y3")], "name_fuzzy_coords")
+
+    def test_fuzzy_merge_respects_distance(self):
+        places = [
+            place("foursquare", "v1", "Steinheil 16", 48.1, 11.5),
+            place("google", "g1", "Steinheil Sechzehn", 48.1004, 11.5),
+        ]
+        canonical, _ = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 2)
+
+    def test_exact_name_ambiguity_uses_unioned_roots(self):
+        places = [
+            place("foursquare", "v1", "Zum Flaucher", 48.1, 11.5, osm_type="node", osm_id=9),
+            place("yelp", "y1", "Zum Flaucher", 48.10001, 11.50001, osm_type="node", osm_id=9),
+            place("google", "g1", "Zum Flaucher", 48.10015, 11.50015),
+        ]
+        canonical, candidates = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(len(canonical[0].members), 3)
+        self.assertEqual(candidates, [])
+
     def test_osm_assignments_attach_to_source_places(self):
         from spot_history.core.identity import OsmAssignment
 

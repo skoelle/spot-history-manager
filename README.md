@@ -55,6 +55,7 @@ python3 -m spot_history index build
 # Kanonische Orte prüfen und manuell korrigieren
 python3 -m spot_history places stats
 python3 -m spot_history places candidates
+python3 -m spot_history places audit
 python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
 
 # Thumbnails für die Web-UI (Pillow, einmalig bzw. nach neuen Fotos)
@@ -208,11 +209,20 @@ Automatisch gemergt wird nur konservativ:
 1. normalisierter Name gleich und Koordinaten höchstens 50 m auseinander
    (genau ein Kandidat), oder
 2. normalisierter Name gleich, keine Yelp-Koordinaten und genau ein
-   Foursquare-Ort mit derselben Stadt.
+   Foursquare-Ort mit derselben Stadt, oder
+3. Namensvariante mit Ähnlichkeit ≥ 0,9 und Koordinaten höchstens 25 m
+   auseinander (genau eine eindeutige Zuordnung, kompatible Kategorie).
+
+Für Variante 3 werden typografische Apostrophe, Umlaut-Schreibweisen
+(`Femörefortet`/`Femorefortet`), Zahlwörter (`Sechzehn`/`16`),
+Klammer-Aliase und generische Präfixe (`Wirtshaus`, `Restaurant`, `Café`,
+`Gartencenter` …) normalisiert. Namensbestandteile, die vollständig in einem
+längeren Namen enthalten sind, gelten als starke Übereinstimmung.
 
 Alles andere landet in `merge_candidates` und wird nicht automatisch
-zusammengeführt, z. B. gleicher Name mit mehreren Kandidaten oder gleicher Name
-in derselben Stadt, aber mit weit auseinanderliegenden Koordinaten.
+zusammengeführt, z. B. gleicher Name mit mehreren Kandidaten, gleicher Name
+in derselben Stadt mit weit auseinanderliegenden Koordinaten oder
+unterschiedliche OSM-IDs.
 
 Sobald eine OSM-ID zugeordnet ist, wird sie zum harten Identitätsmerkmal:
 Quell-Orte mit derselben OSM-ID werden immer zusammengeführt, Quell-Orte mit
@@ -223,9 +233,10 @@ Entscheidungen liegen dauerhaft in
 `data/places/place_rules.db` und überleben jeden Index-Rebuild:
 
 ```bash
-# Zahlen und offene Vorschläge
+# Zahlen, offene Vorschläge und Verdachtsfälle
 python3 -m spot_history places stats
 python3 -m spot_history places candidates [--source yelp] [--json]
+python3 -m spot_history places audit [--source google] [--radius 50] [--json]
 
 # dauerhaft manuell zusammenführen / Auto-Merge abschalten / Regel löschen
 python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
@@ -233,9 +244,19 @@ python3 -m spot_history places unmerge yelp:<place_key>
 python3 -m spot_history places reset yelp:<place_key>
 ```
 
+`places audit` ist rein lesend: Es sucht Orte, die nur aus einer Quelle
+stammen und trotzdem einen nahen Ort einer anderen Quelle mit ähnlichem Namen
+haben. Ausgabe und `--json` eignen sich als Vorher/Nachher-Vergleich nach
+Matching-Änderungen.
+
+Die Venue-Detailseite bietet zusätzlich ein Panel **„Ort zusammenführen“**:
+nahe Orte mit Distanz und Namens-Ähnlichkeit lassen sich direkt zusammenführen;
+bereits zusammengeführte Quell-Orte lassen sich dort wieder trennen. Beides
+schreibt Regeln in `data/places/place_rules.db` und baut den Index neu.
+
 `merge`, `unmerge` und `reset` bauen den Index standardmäßig sofort neu
-(`--no-build` überspringt das). Aktueller Datenstand: 2462 Quell-Orte, 2236
-kanonische Orte, 213 gemergte Orte (davon 2 manuell) und 177 offene
+(`--no-build` überspringt das). Aktueller Datenstand: 2462 Quell-Orte, 2189
+kanonische Orte, 254 gemergte Orte (davon 2 manuell) und 37 offene
 Merge-Vorschläge.
 
 Bekannte Grenzen:
@@ -245,6 +266,12 @@ Bekannte Grenzen:
   der Yelp-Quelle ein Ort.
 - Auto-Merges über Name + Stadt sind Heuristiken; `places unmerge` ist der
   Korrekturweg.
+- Unterschiedliche OSM-IDs bleiben ein harter Konflikt und werden nie
+  automatisch zusammengeführt. Solche Fälle erscheinen im Audit und können über
+  das UI-Panel manuell zusammengeführt werden.
+- Adressbenannte Google-Cluster (Straße + Hausnummer) lassen sich über Namen
+  kaum automatisch zuordnen; sie bleiben Kandidaten für die manuelle
+  Zusammenführung.
 - Nur 16 der 284 Yelp-Orte haben im Export eine echte Business-URL (aus
   Lesezeichen/Sammlungen, die auch einen Check-in haben). Bei den übrigen
   bleibt der Yelp-Link leer.

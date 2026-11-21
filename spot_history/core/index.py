@@ -464,6 +464,7 @@ def build_index(
             "manual": "manual",
             "osm": "high",
             "name_coords": "high",
+            "name_fuzzy_coords": "high",
             "name_city": "medium",
             "name_unique": "medium",
             "single": "high",

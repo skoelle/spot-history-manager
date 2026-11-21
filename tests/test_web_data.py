@@ -10,6 +10,7 @@ from spot_history.core.config import build_paths
 from spot_history.core.identity import upsert_osm_assignment
 from spot_history.core.index import build_index
 from spot_history.core.media import thumb_relpath
+from spot_history.core.places import PlaceRule, upsert_rule
 from spot_history.web import data as web_data
 
 
@@ -195,6 +196,38 @@ class OtherConnector(BaseConnector):
             city="München",
             country_code="DE",
             place_url="https://example.invalid/other/michi",
+        )
+
+
+class NearAlphaConnector(BaseConnector):
+    name = "alpha"
+    kind = "import"
+
+    def iter_visits(self):
+        yield Visit(
+            source="alpha",
+            source_visit_id="alpha-1",
+            visited_at=1700000000,
+            lat=48.1,
+            lng=11.5,
+            place_name="Alpha",
+            source_place_id="a1",
+        )
+
+
+class NearBetaConnector(BaseConnector):
+    name = "beta"
+    kind = "sync"
+
+    def iter_visits(self):
+        yield Visit(
+            source="beta",
+            source_visit_id="beta-1",
+            visited_at=1700000100,
+            lat=48.1001,
+            lng=11.5001,
+            place_name="Beta",
+            source_place_id="b1",
         )
 
 
@@ -696,6 +729,103 @@ class WebDataTest(unittest.TestCase):
         self.assertTrue(by_id["comment:c2"]["coords_derived"])
         self.assertEqual(len(points), 2)
         self.assertEqual(sum(1 for point in points if point["is_comment_only"]), 1)
+
+    def test_nearby_venues_and_source_ref(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {
+                    "alpha": NearAlphaConnector(),
+                    "beta": NearBetaConnector(),
+                },
+                paths,
+                log=lambda _: None,
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                alpha = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Alpha"), limit=10, offset=0
+                )[0]
+                beta = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Beta"), limit=10, offset=0
+                )[0]
+                nearby = web_data.nearby_venues(
+                    conn, alpha["id"], radius_m=50, min_similarity=0.0
+                )
+                filtered = web_data.nearby_venues(
+                    conn, alpha["id"], radius_m=50, min_similarity=0.99
+                )
+                alpha_ref = web_data.venue_source_ref(conn, alpha["id"])
+                beta_ref = web_data.venue_source_ref(conn, beta["id"])
+            finally:
+                conn.close()
+        self.assertEqual([item["key"] for item in nearby], [beta["key"]])
+        self.assertGreater(nearby[0]["distance_m"], 0)
+        self.assertLessEqual(nearby[0]["distance_m"], 50)
+        self.assertEqual(nearby[0]["sources"], ["beta"])
+        self.assertEqual(filtered, [])
+        self.assertEqual(alpha_ref, {"source": "alpha", "source_place_id": "a1"})
+        self.assertEqual(beta_ref, {"source": "beta", "source_place_id": "b1"})
+
+    def test_merge_and_unmerge_rules_rebuild_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            connectors = {
+                "alpha": NearAlphaConnector(),
+                "beta": NearBetaConnector(),
+            }
+            build_index(connectors, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                alpha = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Alpha"), limit=10, offset=0
+                )[0]
+                beta = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Beta"), limit=10, offset=0
+                )[0]
+                alpha_ref = web_data.venue_source_ref(conn, alpha["id"])
+                beta_ref = web_data.venue_source_ref(conn, beta["id"])
+            finally:
+                conn.close()
+            upsert_rule(
+                paths.place_rules_db,
+                PlaceRule(
+                    source=alpha_ref["source"],
+                    source_place_id=alpha_ref["source_place_id"],
+                    action="merge",
+                    target_source=beta_ref["source"],
+                    target_source_place_id=beta_ref["source_place_id"],
+                ),
+            )
+            build_index(connectors, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                merged = web_data.get_venue_by_key(conn, alpha["key"])
+                merged_count = web_data.count_venues(
+                    conn, web_data.VenueFilters()
+                )
+            finally:
+                conn.close()
+            self.assertEqual(merged_count, 1)
+            self.assertEqual(merged["sources"], ["alpha", "beta"])
+
+            upsert_rule(
+                paths.place_rules_db,
+                PlaceRule(
+                    source=alpha_ref["source"],
+                    source_place_id=alpha_ref["source_place_id"],
+                    action="standalone",
+                ),
+            )
+            build_index(connectors, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                split_count = web_data.count_venues(
+                    conn, web_data.VenueFilters()
+                )
+            finally:
+                conn.close()
+            self.assertEqual(split_count, 2)
 
     def test_thumb_relpath_is_stable(self):
         first = thumb_relpath("foursquare", "abc")
