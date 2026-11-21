@@ -361,6 +361,9 @@ python3 -m spot_history places unassign-osm foursquare:<venue_id>
 - Zeitraum 2010-01-28 bis 2026-09-01
 - Paginierung über `beforeTimestamp` (Offset-Paging wird von Foursquare nach
   wenigen hundert Einträgen gekappt und wiederholt dann die erste Seite)
+- Nutzerfotos liefern maximal 200 Einträge pro Seite; der Offset muss um die
+  tatsächlich gelieferte Anzahl erhöht werden. Die 577 API-Items enthalten
+  574 eindeutige IDs (3 Duplikate).
 - Kommentartexte werden über `/v2/checkins/<id>/comments` nachgeladen
 - Der Sync-Stand (`last_max_created_at`) liegt in `sync_state`; `sync` holt nur
   Neues und schreibt Exporte neu
@@ -368,6 +371,9 @@ python3 -m spot_history places unassign-osm foursquare:<venue_id>
   (5 Listen, 150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
   (11, inkl. Details wie Sprache, Saves, Titel) und alle Nutzerfotos
   (577; 562 mit Check-in, 15 standalone)
+- Die fehlenden Einträge (22 Venues, 1 Listeneintrag) werden auch mit
+  alternativen Offset-Strategien nicht ausgeliefert und in
+  `sync_diagnostics` dokumentiert.
 - Tastes (`/v2/users/self/tastes`, 17 Einträge) und die Tip-Details
   (`/v2/tips/<id>`) werden vollständig inklusive Roh-JSON gespeichert
 - Nutzerprofil inklusive Zählern und lokal gespeichertem Avatar
@@ -410,6 +416,9 @@ python3 -m spot_history index build       # Städte in den Index übernehmen
 python3 -m spot_history yelp stats
 ```
 
+Der HTML-Export wird über `YELP_EXPORT_DIR` (oder `--export-dir`) referenziert.
+Ohne Angabe gilt `data/yelp/export` relativ zum Repo.
+
 - 462 Check-ins, 284 Orte, 92 mit Quellkoordinaten, 270 Medien
 - 20 Kommentare ohne Check-in werden als zusätzliche Visits importiert
   (Badge „Kommentar“); 8 bereits verknüpfte Kommentare erscheinen am
@@ -436,6 +445,11 @@ python3 -m spot_history yelp stats
 - 146 Check-in-Visits bleiben ohne Stadt, 176 Yelp-Besuche ohne Kartenpunkt
 - Der Geocoding-Cache liegt unter `data/yelp/` und ist gitignored;
   `--force` erzwingt neue Nominatim-Requests
+- Review-IPs werden importiert; Account-/Login-IPs und deren Dateien bewusst
+  nicht. `--no-media` setzt `local_path` nur, wenn die Zieldatei existiert.
+- Unverknüpft bleiben 327 Check-ins ohne Koordinaten, 111 Orte/146 Visits
+  ohne Stadt sowie 20 Kommentare und 29 Medien. Business-IDs, Adressen,
+  Kategorien und Business-URLs fehlen im Export.
 
 ## Google-Timeline-Import
 
@@ -519,9 +533,7 @@ bleibt manuell; `google.sh` übernimmt Import, OSM-Anreicherung und Index-Rebuil
 
 Der Connector-Vertrag steht in [`CONNECTORS.md`](CONNECTORS.md). Connectoren
 werden automatisch unter `spot_history/connectors/*` entdeckt und müssen dort
-`CONNECTOR` exportieren. Der Yelp-Import ist als Agenten-Prompt vorbereitet:
-[`prompts/yelp-import.md`](prompts/yelp-import.md). Die Foursquare-Erweiterung:
-[`prompts/foursquare-extras.md`](prompts/foursquare-extras.md).
+`CONNECTOR` exportieren.
 
 ## Tests
 

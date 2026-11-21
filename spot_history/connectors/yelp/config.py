@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ...core.config import ROOT
 
-DEFAULT_EXPORT_DIR = Path("/path/to/yelp-export")
+DEFAULT_EXPORT_DIR = ROOT / "data" / "yelp" / "export"
 
 
 @dataclass
