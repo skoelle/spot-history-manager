@@ -628,12 +628,15 @@ ACTIVITY_ORDER = (
     ("review_feedback", "Review-Feedback"),
     ("photo_feedback", "Foto-Feedback"),
     ("business_interaction", "Interaktionen"),
+    ("unlinked_comment", "Nicht zugeordnete Kommentare"),
+    ("unlinked_photo", "Nicht zugeordnete Fotos"),
 )
 
 
 def _record_row(row: sqlite3.Row) -> dict:
     created_at = row["created_at"]
-    return {
+    payload = _parse_json(row["payload_json"]) or {}
+    record = {
         "id": row["record_id"],
         "source": row["source"],
         "kind": row["kind"],
@@ -644,8 +647,33 @@ def _record_row(row: sqlite3.Row) -> dict:
             if created_at
             else None
         ),
-        "payload": _parse_json(row["payload_json"]) or {},
+        "payload": payload,
     }
+    if row["kind"] == "unlinked_photo":
+        local_path = payload.get("local_path") or ""
+        media_type = payload.get("media_type")
+        video = bool(local_path) and is_video(local_path)
+        url = f"/media/{local_path}" if local_path else ""
+        thumb_url = url
+        if local_path and not video:
+            relative = thumb_relpath(row["source"], row["record_id"])
+            if (ROOT / relative).is_file():
+                thumb_url = f"/media/{relative}"
+        place_name = payload.get("place_name") or (
+            "Yelp-Profilfoto" if media_type == "profile_photo" else "Unbekannter Ort"
+        )
+        record.update(
+            {
+                "url": url,
+                "thumb_url": thumb_url,
+                "is_video": video,
+                "is_image": not video,
+                "place_name": place_name,
+                "place_key": None,
+                "city": None,
+            }
+        )
+    return record
 
 
 def records_for_links(

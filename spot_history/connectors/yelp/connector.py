@@ -230,6 +230,38 @@ class YelpConnector(BaseConnector):
                     ),
                 ),
                 (
+                    "unlinked_comment",
+                    "SELECT id, created_at, place_name, text, status "
+                    "FROM checkin_comments WHERE checkin_id IS NULL",
+                    lambda row: (
+                        None,
+                        row["created_at"],
+                        {
+                            "place_name": row["place_name"],
+                            "text": row["text"],
+                            "status": row["status"],
+                        },
+                    ),
+                ),
+                (
+                    "unlinked_photo",
+                    "SELECT id, created_at, place_name, media_type, filename, "
+                    "local_path, caption, status FROM photos "
+                    "WHERE checkin_id IS NULL",
+                    lambda row: (
+                        None,
+                        row["created_at"],
+                        {
+                            "place_name": row["place_name"],
+                            "media_type": row["media_type"],
+                            "filename": row["filename"],
+                            "local_path": row["local_path"],
+                            "caption": row["caption"],
+                            "status": row["status"],
+                        },
+                    ),
+                ),
+                (
                     "review_feedback",
                     "SELECT id, created_at, content_url, business_ref, helpful, "
                     "funny, cool FROM review_feedback",

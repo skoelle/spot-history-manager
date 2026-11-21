@@ -30,6 +30,14 @@
             <span>{{ group.label }}</span>
             <span class="activity-count">{{ group.records|length }}</span>
         </summary>
+        {% if group.kind == 'unlinked_photo' %}
+        <div class="photo-grid">
+            {% for item in group.records %}
+            {% set photo = item %}
+            {% include "_photo_card.html" %}
+            {% endfor %}
+        </div>
+        {% else %}
         <ul class="record-list">
             {% for item in group.records %}
             <li class="record-item">
@@ -96,6 +104,7 @@
                     {% if item.payload.useful %}<span>Nützlich: {{ item.payload.useful }}</span>{% endif %}
                     {% if item.date %}<span>{{ item.date }}</span>{% endif %}
                 </div>
+                <div class="record-note">Kein lokales Foto im Export.</div>
                 {% elif group.kind == 'business_interaction' %}
                 <div class="record-main">{{ item.payload.interaction or 'Interaktion' }}</div>
                 <div class="record-meta">
@@ -106,15 +115,24 @@
                 <div class="record-main">{{ item.payload.question or 'Profilfrage' }}</div>
                 {% if item.payload.answer %}<div class="record-text">{{ item.payload.answer }}</div>{% endif %}
                 {% if item.payload.status %}<div class="record-meta"><span>{{ item.payload.status }}</span></div>{% endif %}
+                {% elif group.kind == 'unlinked_comment' %}
+                <div class="record-main">{{ item.payload.place_name or 'Unbekannter Ort' }}</div>
+                {% if item.payload.text %}<div class="record-text">{{ item.payload.text }}</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.status %}<span>{{ item.payload.status }}</span>{% endif %}
+                </div>
                 {% endif %}
             </li>
             {% endfor %}
         </ul>
+        {% endif %}
     </details>
     {% else %}
     <div class="empty-state">Keine Yelp-Daten im Index.</div>
     {% endfor %}
     {% endif %}
 </div>
+{% include "_lightbox.html" %}
 </body>
 </html>

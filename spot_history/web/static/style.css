@@ -1055,3 +1055,14 @@ button:hover,
     max-height: 12rem;
     overflow-y: auto;
 }
+
+.activity-group .photo-grid {
+    margin-top: 0.25rem;
+}
+
+.record-note {
+    margin-top: 0.35rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-style: italic;
+}

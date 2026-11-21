@@ -84,6 +84,33 @@ class FakeConnector(BaseConnector):
             "created_at": None,
             "payload": {"Vorname": "Test"},
         }
+        yield {
+            "source": "fake",
+            "record_id": "rec4",
+            "kind": "unlinked_comment",
+            "source_place_id": None,
+            "created_at": 1550000000,
+            "payload": {
+                "place_name": "Ohne Check-in",
+                "text": "Kommentar ohne Verknüpfung",
+                "status": "Angezeigt",
+            },
+        }
+        yield {
+            "source": "fake",
+            "record_id": "rec5",
+            "kind": "unlinked_photo",
+            "source_place_id": None,
+            "created_at": 1540000000,
+            "payload": {
+                "place_name": "Ohne Check-in",
+                "media_type": "biz_photo",
+                "filename": "orphan.jpg",
+                "local_path": "data/fake/media/orphan.jpg",
+                "caption": None,
+                "status": "Angezeigt",
+            },
+        }
 
     def iter_visits(self):
         yield Visit(
@@ -463,6 +490,24 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(account["records"][0]["payload"], {"Vorname": "Test"})
         message = next(group for group in groups if group["kind"] == "message")
         self.assertEqual(message["records"][0]["payload"]["text"], "Servus")
+        self.assertEqual(
+            labels["unlinked_comment"], "Nicht zugeordnete Kommentare"
+        )
+        self.assertEqual(labels["unlinked_photo"], "Nicht zugeordnete Fotos")
+        comment = next(
+            group for group in groups if group["kind"] == "unlinked_comment"
+        )
+        self.assertEqual(
+            comment["records"][0]["payload"]["text"],
+            "Kommentar ohne Verknüpfung",
+        )
+        photo = next(group for group in groups if group["kind"] == "unlinked_photo")
+        self.assertEqual(photo["records"][0]["url"], "/media/data/fake/media/orphan.jpg")
+        self.assertEqual(
+            photo["records"][0]["thumb_url"], "/media/data/fake/media/orphan.jpg"
+        )
+        self.assertEqual(photo["records"][0]["place_name"], "Ohne Check-in")
+        self.assertFalse(photo["records"][0]["is_video"])
         self.assertEqual(web_data.load_activity(self.conn, source="unknown"), [])
 
     def test_merged_venue_aggregates_records_from_members(self):

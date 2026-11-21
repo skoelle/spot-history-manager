@@ -114,9 +114,11 @@ Check-in-Karten zeigen bis zu drei Vorschaubilder, Venue-Detailseiten eine
 Galerie. Yelp-Videos werden als eigener Video-Eintrag dargestellt.
 Venue-Detailseiten zeigen zusätzlich Yelp-Survey-Antworten und passende
 Business-Interaktionen. Die Seite `/aktivitaet` bündelt Komplimente,
-Nachrichten, Milestones, Forumsbeiträge, Review-/Foto-Feedback und
-Interaktionen. Sensible Felder (E-Mail, Telefon, IP-Adressen, Logins,
-gemeldete Inhalte) werden importiert, aber nicht im Web angezeigt.
+Nachrichten, Milestones, Forumsbeiträge, Review-/Foto-Feedback, Interaktionen
+sowie die nicht zugeordneten Check-in-Kommentare und -Fotos. Foto-Feedback
+verlinkt auf die Yelp-Fotoseite, da im Export kein lokales Bild dazu existiert.
+Sensible Felder (E-Mail, Telefon, IP-Adressen, Logins, gemeldete Inhalte)
+werden importiert, aber nicht im Web angezeigt.
 
 Der Karten-Popup zeigt Quelle, Kategorie, Adresse/Stadt und einen direkten Link
 zum Ort (`/venues/{key}`), nicht mehr den Foursquare-Original-Link.

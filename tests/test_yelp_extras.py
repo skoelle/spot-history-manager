@@ -67,6 +67,8 @@ class YelpExtrasTest(unittest.TestCase):
         self.assertIn("talk_topic", kinds)
         self.assertIn("review_feedback", kinds)
         self.assertIn("photo_feedback", kinds)
+        self.assertIn("unlinked_comment", kinds)
+        self.assertIn("unlinked_photo", kinds)
         self.assertIn("account", kinds)
         self.assertNotIn("user_login", kinds)
         self.assertNotIn("flagged_content", kinds)
@@ -87,6 +89,25 @@ class YelpExtrasTest(unittest.TestCase):
             {"Vorname", "Nachname", "Geburtstag", "Geschlecht"},
         )
         self.assertNotIn("E-Mail-Adressen", account["payload"])
+
+        unlinked_comments = [
+            record for record in records if record["kind"] == "unlinked_comment"
+        ]
+        unlinked_photos = [
+            record for record in records if record["kind"] == "unlinked_photo"
+        ]
+        self.assertEqual(len(unlinked_comments), 1)
+        self.assertEqual(len(unlinked_photos), 2)
+        self.assertTrue(
+            all(
+                record["source_place_id"] is None
+                for record in unlinked_comments + unlinked_photos
+            )
+        )
+        self.assertEqual(
+            {record["payload"]["media_type"] for record in unlinked_photos},
+            {"biz_photo", "profile_photo"},
+        )
 
         for record in records:
             if record["kind"] in ("review_feedback", "photo_feedback"):
