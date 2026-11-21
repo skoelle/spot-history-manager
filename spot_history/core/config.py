@@ -42,6 +42,10 @@ class Paths:
     def place_rules_db(self) -> Path:
         return self.data_root / "places" / "place_rules.db"
 
+    @property
+    def place_identity_db(self) -> Path:
+        return self.data_root / "places" / "identity.db"
+
     def connector_dir(self, name: str) -> Path:
         return self.data_root / name
 

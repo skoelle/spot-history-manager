@@ -16,7 +16,17 @@ from spot_history.core.places import (
 )
 
 
-def place(source, source_place_id, name, lat=None, lng=None, city=None, url=None):
+def place(
+    source,
+    source_place_id,
+    name,
+    lat=None,
+    lng=None,
+    city=None,
+    url=None,
+    osm_type=None,
+    osm_id=None,
+):
     return SourcePlace(
         source=source,
         source_place_id=source_place_id,
@@ -25,6 +35,8 @@ def place(source, source_place_id, name, lat=None, lng=None, city=None, url=None
         lng=lng,
         city=city,
         place_url=url,
+        osm_type=osm_type,
+        osm_id=osm_id,
     )
 
 
@@ -124,6 +136,58 @@ class PlacesMatchTest(unittest.TestCase):
         places[1].name = "Test Café"
         canonical, _ = resolve_canonical_places(places, rules)
         self.assertEqual(len(canonical), 2)
+
+    def test_local_key_is_derived_from_primary(self):
+        places = [
+            place("yelp", "y1", "Test Café", 48.1, 11.5),
+            place("foursquare", "v1", "Test Café", 48.1001, 11.5001),
+        ]
+        canonical, _ = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(canonical[0].canonical_key, "local-foursquare-v1")
+        self.assertEqual(canonical[0].local_fallback_key, "local-foursquare-v1")
+        self.assertEqual(canonical[0].match_status, "local")
+
+    def test_same_osm_id_merges_across_sources(self):
+        places = [
+            place("foursquare", "v1", "Webster Hall", 40.73, -73.98, osm_type="way", osm_id=247857140),
+            place("yelp", "y1", "Webster Hall NYC", 40.73, -73.98, osm_type="way", osm_id=247857140),
+        ]
+        canonical, _ = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(canonical[0].canonical_key, "osm-way-247857140")
+        self.assertEqual(canonical[0].match_status, "osm")
+        self.assertEqual(canonical[0].osm_type, "way")
+        self.assertEqual(canonical[0].osm_id, 247857140)
+
+    def test_different_osm_ids_are_not_merged(self):
+        places = [
+            place("foursquare", "v1", "Test Café", 48.1, 11.5, osm_type="node", osm_id=1),
+            place("yelp", "y1", "Test Café", 48.1, 11.5, osm_type="node", osm_id=2),
+        ]
+        canonical, candidates = resolve_canonical_places(places)
+        self.assertEqual(len(canonical), 2)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].reason, "osm_conflict")
+        self.assertEqual(
+            {place.canonical_key for place in canonical},
+            {"osm-node-1", "osm-node-2"},
+        )
+
+    def test_osm_assignments_attach_to_source_places(self):
+        from spot_history.core.identity import OsmAssignment
+
+        places = [
+            place("foursquare", "v1", "Test Café", 48.1, 11.5),
+            place("yelp", "y1", "Test Café", 48.1001, 11.5001),
+        ]
+        assignments = {
+            ("foursquare", "v1"): OsmAssignment(osm_type="node", osm_id=99)
+        }
+        canonical, _ = resolve_canonical_places(places, osm_assignments=assignments)
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(canonical[0].canonical_key, "osm-node-99")
+        self.assertEqual(canonical[0].match_status, "osm")
 
     def test_rules_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:

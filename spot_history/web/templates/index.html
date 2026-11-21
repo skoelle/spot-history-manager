@@ -148,7 +148,7 @@
             </div>
             <div class="visit-body">
                 <div class="visit-title">
-                    {% if visit.place_id %}<a href="/venues/{{ visit.place_id }}">{{ visit.place_name or 'Unbekannter Ort' }}</a>{% else %}{{ visit.place_name or 'Unbekannter Ort' }}{% endif %}
+                    {% if visit.place_key %}<a href="/venues/{{ visit.place_key }}">{{ visit.place_name or 'Unbekannter Ort' }}</a>{% else %}{{ visit.place_name or 'Unbekannter Ort' }}{% endif %}
                 </div>
                 <div class="visit-sub">
                     {% if visit.category %}{{ visit.category }}{% endif %}
@@ -168,7 +168,7 @@
                     {% endif %}
                     {% endfor %}
                     {% if visit.photo_count > visit_photos|length %}
-                    <a class="photo-more" href="/venues/{{ visit.place_id }}">+{{ visit.photo_count - visit_photos|length }}</a>
+                    <a class="photo-more" href="/venues/{{ visit.place_key }}">+{{ visit.photo_count - visit_photos|length }}</a>
                     {% endif %}
                 </div>
                 {% endif %}

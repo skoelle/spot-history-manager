@@ -9,8 +9,8 @@
     {% endif %}
     <figcaption class="photo-caption">
         <strong>
-            {% if photo.place_id %}
-            <a href="/venues/{{ photo.place_id }}">{{ photo.place_name or 'Unbekannter Ort' }}</a>
+            {% if photo.place_key %}
+            <a href="/venues/{{ photo.place_key }}">{{ photo.place_name or 'Unbekannter Ort' }}</a>
             {% else %}
             {{ photo.place_name or 'Unbekannter Ort' }}
             {% endif %}

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..connectors.base import BaseConnector
 from .config import Paths
+from .identity import load_aliases, load_osm_assignments, record_aliases
 from .places import (
     collect_source_places,
     load_rules,
@@ -35,6 +36,10 @@ def feature_for_row(row, photos: list[str], sources: list[str] | None = None) ->
             "visit_id": row["source_visit_id"],
             "place": row["place_name"],
             "place_id": row["place_id"],
+            "place_key": row["place_key"],
+            "osm_type": row["osm_type"],
+            "osm_id": row["osm_id"],
+            "match_status": row["match_status"],
             "category": row["category"],
             "visited_at": row["visited_at"],
             "visited_at_utc": iso_utc(row["visited_at"]),
@@ -137,7 +142,15 @@ CREATE TABLE canonical_places (
     country_code TEXT,
     primary_source TEXT,
     sources_json TEXT NOT NULL DEFAULT '[]',
-    source_count INTEGER NOT NULL DEFAULT 0
+    source_count INTEGER NOT NULL DEFAULT 0,
+    osm_type TEXT,
+    osm_id INTEGER,
+    match_status TEXT NOT NULL DEFAULT 'local'
+);
+
+CREATE TABLE canonical_aliases (
+    alias_key TEXT PRIMARY KEY,
+    canonical_key TEXT NOT NULL
 );
 
 CREATE TABLE place_links (
@@ -337,8 +350,13 @@ def build_index(
 
         source_places = collect_source_places(all_visits)
         rules = load_rules(paths.place_rules_db)
+        osm_assignments = load_osm_assignments(paths.place_identity_db)
+        persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
-            source_places.values(), rules, log=log
+            source_places.values(),
+            rules,
+            log=log,
+            osm_assignments=osm_assignments,
         )
 
         source_place_ids: dict[tuple[str, str], int] = {}
@@ -370,20 +388,23 @@ def build_index(
 
         confidence_for_method = {
             "manual": "manual",
+            "osm": "high",
             "name_coords": "high",
             "name_city": "medium",
             "single": "high",
         }
         canonical_ids: dict[tuple[str, str], int] = {}
         canonical_by_id: dict[int, object] = {}
+        alias_map: dict[str, str] = {}
         link_total = 0
         for canonical in canonical_places:
             lat, lng = canonical.coords
             cursor = conn.execute(
                 "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
                 "category, address, city, state, postal_code, country_code, "
-                "primary_source, sources_json, source_count) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "primary_source, sources_json, source_count, osm_type, osm_id, "
+                "match_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
                     canonical.name,
@@ -398,8 +419,14 @@ def build_index(
                     canonical.primary_source,
                     json.dumps(canonical.sources, ensure_ascii=False),
                     len(canonical.members),
+                    canonical.osm_type,
+                    canonical.osm_id,
+                    canonical.match_status,
                 ),
             )
+            for alias in (canonical.local_fallback_key, canonical.legacy_key):
+                if alias and alias != canonical.canonical_key:
+                    alias_map.setdefault(alias, canonical.canonical_key)
             canonical_id = int(cursor.lastrowid)
             canonical_by_id[canonical_id] = canonical
             for member in canonical.members:
@@ -420,6 +447,19 @@ def build_index(
                 )
                 canonical_ids[member.key] = canonical_id
                 link_total += 1
+
+        known_keys = {canonical.canonical_key for canonical in canonical_places}
+        for alias, target in persistent_aliases.items():
+            if alias in known_keys or target not in known_keys:
+                continue
+            alias_map.setdefault(alias, target)
+        if alias_map:
+            conn.executemany(
+                "INSERT OR IGNORE INTO canonical_aliases (alias_key, canonical_key) "
+                "VALUES (?, ?)",
+                sorted(alias_map.items()),
+            )
+            record_aliases(paths.place_identity_db, alias_map)
 
         for candidate in candidates:
             first, second = candidate.ordered_pair
@@ -514,7 +554,8 @@ def build_index(
         for visit_row in conn.execute(
             "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
             "v.note, v.source_url, v.has_coords, v.coords_derived, "
-            "p.id AS place_id, p.name AS place_name, p.lat, p.lng, "
+            "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
+            "p.lat, p.lng, p.osm_type, p.osm_id, p.match_status, "
             "p.category, p.address, p.city, p.state, p.country_code, p.sources_json "
             "FROM visits v JOIN canonical_places p ON p.id = v.canonical_place_id "
             "WHERE p.lat IS NOT NULL AND p.lng IS NOT NULL "
@@ -556,6 +597,14 @@ def build_index(
         "place_links": link_total,
         "merge_candidates": len(candidates),
         "timezones": timezone_summary,
+        "matched_osm": sum(1 for place in canonical_places if place.match_status == "osm"),
+        "unmatched_local": sum(
+            1 for place in canonical_places if place.match_status == "local"
+        ),
+        "osm_conflicts": sum(
+            1 for place in canonical_places if place.match_status == "conflict"
+        ),
+        "aliases": len(alias_map),
         "index_db": paths.index_db,
         "geojson": paths.map_geojson,
     }
@@ -563,7 +612,8 @@ def build_index(
         f"Index: {total_visits} Visits, {total_photos} Fotos, "
         f"{feature_count} Kartenpunkte, {place_details_total} Ortsdetails, "
         f"{len(source_places)} Quell-Orte -> {len(canonical_places)} kanonische Orte "
-        f"({link_total} Links, {len(candidates)} Merge-Vorschläge) "
+        f"({link_total} Links, {len(candidates)} Merge-Vorschläge, "
+        f"{summary['matched_osm']} OSM / {summary['unmatched_local']} lokal) "
         f"-> {paths.index_db}"
     )
     return summary

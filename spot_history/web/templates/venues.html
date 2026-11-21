@@ -83,7 +83,12 @@
             <tbody>
                 {% for venue in venues %}
                 <tr>
-                    <td><a href="/venues/{{ venue.id }}">{{ venue.name or 'Unbekannter Ort' }}</a></td>
+                    <td>
+                        <a href="/venues/{{ venue.key }}">{{ venue.name or 'Unbekannter Ort' }}</a>
+                        {% if venue.match_status == 'osm' %}<span class="badge">OSM</span>
+                        {% elif venue.match_status == 'conflict' %}<span class="badge derived">Konflikt</span>
+                        {% else %}<span class="badge">lokal</span>{% endif %}
+                    </td>
                     <td>{{ venue.city or '—' }}</td>
                     <td>{{ venue.category or '—' }}</td>
                     <td class="num">{{ venue.visits_count }}</td>

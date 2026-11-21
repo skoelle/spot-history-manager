@@ -63,8 +63,8 @@
         if (visit.coords_derived) {
             parts.push('<span class="badge derived">Ort abgeleitet</span>');
         }
-        if (visit.place_id) {
-            parts.push(`<a href="/venues/${visit.place_id}">Zum Ort</a>`);
+        if (visit.place_key) {
+            parts.push(`<a href="/venues/${encodeURIComponent(visit.place_key)}">Zum Ort</a>`);
         }
         marker.bindPopup(parts.join("<br>"));
         marker.addTo(map);

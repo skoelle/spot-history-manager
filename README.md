@@ -77,6 +77,7 @@ data/
 ├── yelp/                      yelp.db + media/ + thumbs/ (HTML-Import)
 ├── google/                    (kommt später) google.db
 ├── places/place_rules.db      persistente manuelle Merge-/Unmerge-Regeln
+├── places/identity.db         persistente OSM-Zuordnungen + URL-Aliase
 ├── index/index.db             zentraler, rebuildbarer Index
 └── exports/visits.geojson     Kartenpunkte aller Quellen
 ```
@@ -95,7 +96,11 @@ OpenStreetMap-Tiles (Leaflet liegt lokal unter
 pro Seite. Klick auf Karte und Liste ist synchronisiert.
 
 Zusätzlich gibt es eine Profilkarte mit lokal gespeichertem Avatar sowie eine
-Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{id}`.
+Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{key}`.
+Der `{key}` ist `osm-<type>-<id>` (z. B. `osm-way-247857140`) für gematchte Orte
+und `local-<source>-<source_place_id>` für noch nicht gematchte Orte. Alte
+Integer-URLs und frühere Schlüssel werden per 302 auf den aktuellen Key
+umgeleitet.
 Die Ortsliste zeigt einen Eintrag pro kanonischem Ort mit Badges für alle
 Quellen. Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl,
 ersten und letzten Besuch, Fotoanzahl, Fotogalerie, die Besuchshistorie und
@@ -108,7 +113,7 @@ bis zu drei Vorschaubilder, Venue-Detailseiten eine Galerie. Yelp-Videos werden
 als eigener Video-Eintrag dargestellt.
 
 Der Karten-Popup zeigt Quelle, Kategorie, Adresse/Stadt und einen direkten Link
-zum Ort (`/venues/{id}`), nicht mehr den Foursquare-Original-Link.
+zum Ort (`/venues/{key}`), nicht mehr den Foursquare-Original-Link.
 
 Lokale Bilder und Thumbnails werden über `/media/...` ausgeliefert. Erlaubt sind
 nur Bild- und Videodateien unter `data/*/profile/`, `data/*/photos/`,
@@ -128,7 +133,9 @@ gedacht.
 - `source_profiles` – Anzeigename, Home City, Avatar und Zähler je Quelle
 - `places` – quellenspezifische Orte (`source`, `source_place_id`)
 - `place_details` – Kontakt, Social-Media, Kategorien und Datenstand je Ort
-- `canonical_places` – ein Ort pro realem Ort, aggregiert über Quellen
+- `canonical_places` – ein Ort pro realem Ort, aggregiert über Quellen, inkl.
+  `canonical_key`, `osm_type`, `osm_id` und `match_status`
+- `canonical_aliases` – frühere Keys für Redirects auf den aktuellen Key
 - `place_links` – Quell-Identitäten und Links je kanonischem Ort
 - `merge_candidates` – nicht automatisch angewandte Merge-Vorschläge
 - `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
@@ -158,7 +165,13 @@ Automatisch gemergt wird nur konservativ:
 
 Alles andere landet in `merge_candidates` und wird nicht automatisch
 zusammengeführt, z. B. gleicher Name mit mehreren Kandidaten oder gleicher Name
-in derselben Stadt, aber mit weit auseinanderliegenden Koordinaten. Manuelle
+in derselben Stadt, aber mit weit auseinanderliegenden Koordinaten.
+
+Sobald eine OSM-ID zugeordnet ist, wird sie zum harten Identitätsmerkmal:
+Quell-Orte mit derselben OSM-ID werden immer zusammengeführt, Quell-Orte mit
+unterschiedlichen OSM-IDs nie. Die Zuordnungen liegen persistent in
+`data/places/identity.db` und überleben jeden Index-Rebuild; dort werden auch
+Aliase für Redirects gespeichert. Manuelle
 Entscheidungen liegen dauerhaft in
 `data/places/place_rules.db` und überleben jeden Index-Rebuild:
 
@@ -187,8 +200,9 @@ Bekannte Grenzen:
 - Nur 16 der 284 Yelp-Orte haben im Export eine echte Business-URL (aus
   Lesezeichen/Sammlungen, die auch einen Check-in haben). Bei den übrigen
   bleibt der Yelp-Link leer.
-- Interne `/venues/{id}`-URLs können sich ändern, wenn sich die kanonische
-  Mitgliedschaft ändert; der Index bleibt rebuildbar.
+- Öffentliche Orts-URLs verwenden `canonical_key` (`osm-...` oder `local-...`),
+  nicht den internen Integer-`id`. Frühere Keys bleiben über
+  `canonical_aliases` (und `data/places/identity.db`) als Redirect erhalten.
 
 ## Foursquare-Details
 

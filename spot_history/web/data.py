@@ -141,6 +141,7 @@ def _format_row(row: sqlite3.Row) -> dict:
         "month": MONTHS[moment.month - 1],
         "year": moment.strftime("%Y"),
         "place_id": row["place_id"],
+        "place_key": row["place_key"],
         "place_name": row["place_name"],
         "category": row["category"],
         "address": row["address"],
@@ -160,8 +161,8 @@ def _format_row(row: sqlite3.Row) -> dict:
 VISIT_SELECT = (
     "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
     "v.note, v.source_url, v.has_coords, v.coords_derived, "
-    "p.id AS place_id, p.name AS place_name, p.category, p.address, p.city, "
-    "p.state, p.country_code, p.lat, p.lng, "
+    "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
+    "p.category, p.address, p.city, p.state, p.country_code, p.lat, p.lng, "
     "(SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count "
     f"{FROM}"
 )
@@ -198,6 +199,7 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "lng": row["lng"],
             "place": row["place_name"],
             "place_id": row["place_id"],
+            "place_key": row["place_key"],
             "category": row["category"],
             "address": row["address"],
             "city": row["city"],
@@ -218,7 +220,8 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
 PHOTO_SELECT = (
     "SELECT ph.source, ph.source_photo_id, ph.local_path, "
     "ph.url AS photo_url, ph.taken_at, v.id AS visit_id, v.visited_at, "
-    "v.local_datetime, v.source_url, p.id AS place_id, p.name AS place_name, "
+    "v.local_datetime, v.source_url, p.id AS place_id, "
+    "p.canonical_key AS place_key, p.name AS place_name, "
     "p.category, p.address, p.city "
     "FROM photos ph JOIN visits v ON v.id = ph.visit_id "
     "LEFT JOIN canonical_places p ON p.id = v.canonical_place_id"
@@ -270,6 +273,7 @@ def _format_photo(row: sqlite3.Row) -> dict:
         "source": source,
         "visit_id": row["visit_id"],
         "place_id": row["place_id"],
+        "place_key": row["place_key"],
         "place_name": row["place_name"],
         "category": row["category"],
         "address": row["address"],
@@ -449,7 +453,8 @@ def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
 VENUE_SELECT = (
     "SELECT p.id, p.canonical_key, p.primary_source AS source, p.name, "
     "p.category, p.address, p.city, p.state, p.postal_code, p.country_code, "
-    "p.lat, p.lng, p.sources_json, p.source_count, "
+    "p.lat, p.lng, p.sources_json, p.source_count, p.osm_type, p.osm_id, "
+    "p.match_status, "
     "COUNT(v.id) AS visits_count, MIN(v.visited_at) AS first_visit, "
     "MAX(v.visited_at) AS last_visit, "
     "(SELECT COUNT(*) FROM photos ph JOIN visits pv ON pv.id = ph.visit_id "
@@ -581,7 +586,16 @@ def _format_venue(
         break
     return {
         "id": row["id"],
+        "key": row["canonical_key"],
         "canonical_key": row["canonical_key"],
+        "osm_type": row["osm_type"],
+        "osm_id": row["osm_id"],
+        "match_status": row["match_status"],
+        "osm_url": (
+            f"https://www.openstreetmap.org/{row['osm_type']}/{row['osm_id']}"
+            if row["osm_type"] and row["osm_id"] is not None
+            else None
+        ),
         "source": source,
         "sources": sources,
         "links": links,
@@ -635,6 +649,48 @@ def get_venue(conn: sqlite3.Connection, place_id: int) -> dict | None:
     venue_links = _links_for_places(conn, [place_id]).get(place_id, [])
     details = _details_for_links(conn, venue_links)
     return _format_venue(row, venue_links, details)
+
+
+def _venue_id_for_key(conn: sqlite3.Connection, key: str) -> int | None:
+    current = key
+    seen: set[str] = set()
+    for _ in range(8):
+        if current in seen:
+            break
+        seen.add(current)
+        row = conn.execute(
+            "SELECT id FROM canonical_places WHERE canonical_key = ?", (current,)
+        ).fetchone()
+        if row:
+            return int(row["id"])
+        legacy = conn.execute(
+            "SELECT canonical_id FROM place_links "
+            "WHERE source || ':' || source_place_id = ?",
+            (current,),
+        ).fetchone()
+        if legacy:
+            return int(legacy["canonical_id"])
+        alias = conn.execute(
+            "SELECT canonical_key FROM canonical_aliases WHERE alias_key = ?",
+            (current,),
+        ).fetchone()
+        if not alias:
+            break
+        current = alias["canonical_key"]
+    if key.isdigit():
+        row = conn.execute(
+            "SELECT id FROM canonical_places WHERE id = ?", (int(key),)
+        ).fetchone()
+        if row:
+            return int(row["id"])
+    return None
+
+
+def get_venue_by_key(conn: sqlite3.Connection, key: str) -> dict | None:
+    place_id = _venue_id_for_key(conn, key)
+    if place_id is None:
+        return None
+    return get_venue(conn, place_id)
 
 
 def build_time(conn: sqlite3.Connection) -> str | None:

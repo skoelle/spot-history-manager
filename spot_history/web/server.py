@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -314,10 +314,8 @@ def photos(
     )
 
 
-@app.get("/venues/{place_id}", response_class=HTMLResponse)
-def venue_detail(
-    request: Request, place_id: int, page: int = 1
-) -> HTMLResponse:
+@app.get("/venues/{key}", response_class=HTMLResponse)
+def venue_detail(request: Request, key: str, page: int = 1) -> HTMLResponse:
     index_db = paths.index_db
     if not index_db.exists():
         raise HTTPException(status_code=503, detail="Index missing")
@@ -328,9 +326,15 @@ def venue_detail(
             (item for item in profiles if item["source"] == "foursquare"),
             profiles[0] if profiles else None,
         )
-        venue = web_data.get_venue(conn, place_id)
+        venue = web_data.get_venue_by_key(conn, key)
         if not venue:
             raise HTTPException(status_code=404, detail="Venue not found")
+        if key != venue["key"]:
+            target = f"/venues/{venue['key']}"
+            if page > 1:
+                target += f"?page={page}"
+            return RedirectResponse(target, status_code=302)
+        place_id = venue["id"]
         filters = web_data.Filters(place_id=place_id)
         total = web_data.count_visits(conn, filters)
         pages = max(1, (total + web_data.PAGE_SIZE - 1) // web_data.PAGE_SIZE)
@@ -353,10 +357,10 @@ def venue_detail(
             "page": page,
             "pages": pages,
             "prev_url": (
-                f"/venues/{place_id}?page={page - 1}" if page > 1 else None
+                f"/venues/{venue['key']}?page={page - 1}" if page > 1 else None
             ),
             "next_url": (
-                f"/venues/{place_id}?page={page + 1}" if page < pages else None
+                f"/venues/{venue['key']}?page={page + 1}" if page < pages else None
             ),
             "profile": profile,
         },

@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .identity import OsmAssignment, osm_key
+from .identity import local_key as build_local_key
+
 SOURCE_PRIORITY = ("foursquare", "yelp")
 MATCH_DISTANCE_M = 50.0
 
@@ -94,6 +97,8 @@ class SourcePlace:
     country_code: str | None = None
     place_url: str | None = None
     visit_count: int = 0
+    osm_type: str | None = None
+    osm_id: int | None = None
 
     @property
     def key(self) -> tuple[str, str]:
@@ -106,6 +111,16 @@ class SourcePlace:
     @property
     def has_coords(self) -> bool:
         return self.lat is not None and self.lng is not None
+
+    @property
+    def has_osm(self) -> bool:
+        return self.osm_type is not None and self.osm_id is not None
+
+    @property
+    def osm_ref(self) -> tuple[str, int] | None:
+        if not self.has_osm:
+            return None
+        return (self.osm_type, int(self.osm_id))
 
 
 @dataclass
@@ -149,6 +164,17 @@ class CanonicalPlace:
     primary: SourcePlace
     members: list[SourcePlace]
     methods: dict[tuple[str, str], str] = field(default_factory=dict)
+    osm_type: str | None = None
+    osm_id: int | None = None
+    match_status: str = "local"
+
+    @property
+    def local_fallback_key(self) -> str:
+        return build_local_key(self.primary.source, self.primary.source_place_id)
+
+    @property
+    def legacy_key(self) -> str:
+        return self.primary.ref
 
     @property
     def sorted_members(self) -> list[SourcePlace]:
@@ -291,8 +317,16 @@ def resolve_canonical_places(
     source_places: Iterable[SourcePlace],
     rules: Iterable[PlaceRule] = (),
     log=None,
+    osm_assignments: dict[tuple[str, str], OsmAssignment] | None = None,
 ) -> tuple[list[CanonicalPlace], list[MergeCandidate]]:
     places = {place.key: place for place in source_places}
+    if osm_assignments:
+        for key, place in places.items():
+            assignment = osm_assignments.get(key)
+            if assignment is None or assignment.status == "rejected":
+                continue
+            place.osm_type = assignment.osm_type
+            place.osm_id = int(assignment.osm_id)
     union = _UnionFind()
     for key in places:
         union.add(key)
@@ -325,6 +359,20 @@ def resolve_canonical_places(
         methods[key] = "manual"
         methods.setdefault(target, "manual")
         union.union(key, target)
+
+    osm_groups: dict[tuple[str, int], list[SourcePlace]] = {}
+    for place in places.values():
+        if place.has_osm:
+            osm_groups.setdefault(place.osm_ref, []).append(place)
+    for members in osm_groups.values():
+        first = members[0]
+        for other in members[1:]:
+            union.union(first.key, other.key)
+        for member in members:
+            methods.setdefault(member.key, "osm")
+
+    def osm_conflict(a: SourcePlace, b: SourcePlace) -> bool:
+        return a.has_osm and b.has_osm and a.osm_ref != b.osm_ref
 
     name_groups: dict[str, list[SourcePlace]] = {}
     for place in places.values():
@@ -372,6 +420,21 @@ def resolve_canonical_places(
                     continue
                 if first.key in standalone or second.key in standalone:
                     continue
+                if osm_conflict(first, second):
+                    distance = (
+                        haversine_m(first.lat, first.lng, second.lat, second.lng)
+                        if first.has_coords and second.has_coords
+                        else None
+                    )
+                    add_candidate(
+                        first,
+                        second,
+                        "osm_conflict",
+                        "high",
+                        distance,
+                        first.city or second.city,
+                    )
+                    continue
                 first_city = normalize_name(first.city)
                 second_city = normalize_name(second.city)
                 if first.has_coords and second.has_coords:
@@ -418,14 +481,26 @@ def resolve_canonical_places(
         if not members:
             continue
         primary = _select_primary(members)
+        osm_refs = {member.osm_ref for member in members if member.has_osm}
+        if len(osm_refs) == 1:
+            osm_type, osm_id = next(iter(osm_refs))
+            canonical_key = osm_key(osm_type, osm_id)
+            match_status = "osm"
+        else:
+            osm_type, osm_id = None, None
+            canonical_key = build_local_key(primary.source, primary.source_place_id)
+            match_status = "conflict" if len(osm_refs) > 1 else "local"
         canonical.append(
             CanonicalPlace(
-                canonical_key=primary.ref,
+                canonical_key=canonical_key,
                 primary=primary,
                 members=members,
                 methods={
                     member.key: methods.get(member.key, "single") for member in members
                 },
+                osm_type=osm_type,
+                osm_id=osm_id,
+                match_status=match_status,
             )
         )
 

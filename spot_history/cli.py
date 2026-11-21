@@ -172,6 +172,13 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
         linked = conn.execute(
             "SELECT COUNT(*) FROM place_links WHERE url IS NOT NULL AND url != ''"
         ).fetchone()[0]
+        match_counts = {
+            row["match_status"]: row["n"]
+            for row in conn.execute(
+                "SELECT match_status, COUNT(*) AS n FROM canonical_places "
+                "GROUP BY match_status"
+            )
+        }
     finally:
         conn.close()
     rules = place_core.load_rules(paths.place_rules_db)
@@ -180,11 +187,15 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     print(f"Quell-Orte:        {counts['places']}")
     print(f"Kanonische Orte:   {counts['canonical_places']}")
     print(f"Gemergte Orte:     {merged}")
+    print(f"Mit OSM-ID:        {match_counts.get('osm', 0)}")
+    print(f"Ohne OSM-ID:       {match_counts.get('local', 0)}")
+    print(f"OSM-Konflikte:     {match_counts.get('conflict', 0)}")
     print(f"Quell-Links:       {counts['place_links']} ({linked} mit URL)")
     print(f"Merge-Vorschläge:  {counts['merge_candidates']}")
     print(f"Manuelle Merges:   {manual_merges}")
     print(f"Standalone-Regeln: {standalone}")
     print(f"Regel-DB:          {paths.place_rules_db}")
+    print(f"Identitäts-DB:     {paths.place_identity_db}")
     return 0
 
 

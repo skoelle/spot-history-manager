@@ -37,6 +37,13 @@
             {% if venue.lat is not none and venue.lng is not none %}
             <span>{{ "%.5f"|format(venue.lat) }}, {{ "%.5f"|format(venue.lng) }}</span>
             {% endif %}
+            {% if venue.osm_url %}
+            <span>OSM: <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a></span>
+            {% elif venue.match_status == 'conflict' %}
+            <span class="badge derived">OSM-Konflikt</span>
+            {% else %}
+            <span class="badge">lokal</span>
+            {% endif %}
             {% for link in venue.links %}
             {% if link.url %}
             <a href="{{ link.url }}" target="_blank" rel="noopener">Auf {{ link.source|capitalize }}</a>

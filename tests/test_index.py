@@ -8,6 +8,7 @@ from pathlib import Path
 
 from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.core.config import build_paths
+from spot_history.core.identity import upsert_osm_assignment
 from spot_history.core.index import build_index
 
 
@@ -207,6 +208,62 @@ class IndexTest(unittest.TestCase):
             for feature in payload["features"]:
                 self.assertEqual(feature["properties"]["sources"], ["fake", "other"])
                 self.assertEqual(feature["properties"]["place_id"], canonical[0]["id"])
+
+    def test_index_uses_local_and_osm_keys_with_aliases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {"fake": FakeConnector(), "other": OtherConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            conn = sqlite3.connect(paths.index_db)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute("SELECT * FROM canonical_places").fetchone()
+                alias_rows = conn.execute(
+                    "SELECT alias_key, canonical_key FROM canonical_aliases"
+                ).fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(row["canonical_key"], "local-fake-p1")
+            self.assertEqual(row["match_status"], "local")
+            self.assertIsNone(row["osm_type"])
+            aliases = {item["alias_key"]: item["canonical_key"] for item in alias_rows}
+            self.assertEqual(aliases["fake:p1"], "local-fake-p1")
+
+            upsert_osm_assignment(
+                paths.place_identity_db, "other", "op1", "way", 247857140
+            )
+            summary = build_index(
+                {"fake": FakeConnector(), "other": OtherConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            self.assertEqual(summary["matched_osm"], 1)
+            conn = sqlite3.connect(paths.index_db)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute("SELECT * FROM canonical_places").fetchone()
+                aliases = {
+                    item["alias_key"]: item["canonical_key"]
+                    for item in conn.execute(
+                        "SELECT alias_key, canonical_key FROM canonical_aliases"
+                    )
+                }
+            finally:
+                conn.close()
+            self.assertEqual(row["canonical_key"], "osm-way-247857140")
+            self.assertEqual(row["match_status"], "osm")
+            self.assertEqual(row["osm_type"], "way")
+            self.assertEqual(row["osm_id"], 247857140)
+            self.assertEqual(aliases["local-fake-p1"], "osm-way-247857140")
+
+            payload = json.loads(Path(paths.map_geojson).read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["features"][0]["properties"]["place_key"],
+                "osm-way-247857140",
+            )
 
     def test_rebuild_discards_stale_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

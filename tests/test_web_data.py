@@ -322,6 +322,31 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(len(detail["links"]), 2)
         self.assertEqual({visit["source"] for visit in visits}, {"fake", "other"})
 
+    def test_venue_lookup_by_key_and_legacy(self):
+        venues = web_data.query_venues(
+            self.conn, web_data.VenueFilters(q="Michaeligarten"), limit=10, offset=0
+        )
+        self.assertEqual(len(venues), 1)
+        key = venues[0]["key"]
+        self.assertEqual(key, "local-fake-p1")
+        self.assertEqual(venues[0]["match_status"], "local")
+        self.assertIsNone(venues[0]["osm_url"])
+
+        by_key = web_data.get_venue_by_key(self.conn, key)
+        self.assertIsNotNone(by_key)
+        self.assertEqual(by_key["key"], key)
+        self.assertEqual(by_key["id"], venues[0]["id"])
+
+        by_legacy = web_data.get_venue_by_key(self.conn, "fake:p1")
+        self.assertIsNotNone(by_legacy)
+        self.assertEqual(by_legacy["key"], key)
+
+        by_numeric = web_data.get_venue_by_key(self.conn, str(venues[0]["id"]))
+        self.assertIsNotNone(by_numeric)
+        self.assertEqual(by_numeric["key"], key)
+
+        self.assertIsNone(web_data.get_venue_by_key(self.conn, "osm-way-1"))
+
     def test_thumb_relpath_is_stable(self):
         first = thumb_relpath("foursquare", "abc")
         self.assertEqual(first, thumb_relpath("foursquare", "abc"))
