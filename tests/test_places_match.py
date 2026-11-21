@@ -310,6 +310,36 @@ class PlacesMatchTest(unittest.TestCase):
         self.assertEqual(canonical[0].canonical_key, "osm-node-99")
         self.assertEqual(canonical[0].match_status, "osm")
 
+    def test_osm_cities_override_source_districts(self):
+        places = [
+            place(
+                "foursquare",
+                "v1",
+                "toom Baumarkt",
+                48.1,
+                11.5,
+                city="Haidhausen",
+                osm_type="way",
+                osm_id=27379527,
+            ),
+            place(
+                "google",
+                "g1",
+                "toom Baumarkt",
+                48.1001,
+                11.5001,
+                city="München",
+                osm_type="way",
+                osm_id=27379527,
+            ),
+        ]
+        canonical, _ = resolve_canonical_places(
+            places, osm_cities={("way", 27379527): "München"}
+        )
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(canonical[0].city, "München")
+        self.assertTrue(all(member.city == "München" for member in places))
+
     def test_rules_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "places" / "place_rules.db"

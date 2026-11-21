@@ -14,7 +14,7 @@ from .identity import (
     local_key,
     record_aliases,
 )
-from .osm_coords import load_osm_coords
+from .osm_coords import load_osm_cities, load_osm_coords
 from .places import (
     collect_source_places,
     load_rules,
@@ -427,12 +427,14 @@ def build_index(
         rules = load_rules(paths.place_rules_db)
         osm_assignments = load_osm_assignments(paths.place_identity_db)
         osm_coords = load_osm_coords(paths.osm_db)
+        osm_cities = load_osm_cities(paths.osm_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
             rules,
             log=log,
             osm_assignments=osm_assignments,
+            osm_cities=osm_cities,
         )
 
         source_place_ids: dict[tuple[str, str], int] = {}

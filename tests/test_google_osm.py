@@ -16,6 +16,7 @@ from spot_history.connectors.google.scoring import (
     decide,
     is_valid_poi,
     nominatim_candidate,
+    poi_city,
     rank_candidates,
 )
 from spot_history.connectors.osm.db import Poi
@@ -105,6 +106,26 @@ class GoogleScoringTest(unittest.TestCase):
         self.assertEqual(info["name"], "Spielplatz")
         self.assertEqual(info["address"], "Teststraße 2")
         self.assertEqual(info["city"], "München")
+
+    def test_nominatim_candidate_prefers_municipality_over_suburb(self):
+        info = nominatim_candidate(
+            {
+                "name": "Spielplatz",
+                "category": "leisure",
+                "type": "playground",
+                "address": {"suburb": "Haidhausen", "municipality": "München"},
+            }
+        )
+        self.assertEqual(info["city"], "München")
+
+    def test_poi_city_ignores_suburb(self):
+        self.assertEqual(
+            poi_city(
+                _poi("Café", {"addr:city": "München", "addr:suburb": "Haidhausen"})
+            ),
+            "München",
+        )
+        self.assertIsNone(poi_city(_poi("Café", {"addr:suburb": "Haidhausen"})))
 
 
 class GoogleOsmEnrichTest(unittest.TestCase):

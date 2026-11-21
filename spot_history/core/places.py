@@ -396,6 +396,7 @@ def resolve_canonical_places(
     rules: Iterable[PlaceRule] = (),
     log=None,
     osm_assignments: dict[tuple[str, str], OsmAssignment] | None = None,
+    osm_cities: dict[tuple[str, int], str] | None = None,
 ) -> tuple[list[CanonicalPlace], list[MergeCandidate]]:
     places = {place.key: place for place in source_places}
     if osm_assignments:
@@ -405,6 +406,13 @@ def resolve_canonical_places(
                 continue
             place.osm_type = assignment.osm_type
             place.osm_id = int(assignment.osm_id)
+    if osm_cities:
+        for place in places.values():
+            if not place.has_osm:
+                continue
+            city = osm_cities.get(place.osm_ref)
+            if city:
+                place.city = city
     union = _UnionFind()
     for key in places:
         union.add(key)

@@ -24,6 +24,7 @@ from .scoring import (
     decide,
     is_valid_poi,
     nominatim_candidate,
+    poi_city,
     rank_candidates,
 )
 
@@ -177,7 +178,7 @@ def _apply_osm_name(
         cluster["cluster_key"],
         name=candidate.poi.name,
         address=candidate.poi.address,
-        city=candidate.poi.city,
+        city=poi_city(candidate.poi) or cluster.get("city"),
         country_code=None,
         category=candidate.category,
         name_source="osm",

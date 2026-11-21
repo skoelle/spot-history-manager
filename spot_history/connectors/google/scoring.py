@@ -74,6 +74,12 @@ def poi_category(poi: Poi) -> str | None:
     return None
 
 
+def poi_city(poi: Poi) -> str | None:
+    """Return the municipality from OSM tags, never a mere suburb/district."""
+    city = poi.tags.get("addr:city")
+    return str(city) if city else None
+
+
 def is_valid_poi(poi: Poi) -> bool:
     if not poi.name or not poi.name.strip():
         return False
@@ -172,6 +178,7 @@ def format_address(payload: dict) -> tuple[str | None, str | None, str | None]:
         address.get("city")
         or address.get("town")
         or address.get("village")
+        or address.get("municipality")
         or address.get("suburb")
     )
     country = address.get("country_code")

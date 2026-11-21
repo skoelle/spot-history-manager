@@ -25,7 +25,7 @@ from spot_history.connectors.osm.sync import sync
 from spot_history.core import identity
 from spot_history.core.config import build_paths
 from spot_history.core.index import build_index
-from spot_history.core.osm_coords import load_osm_coords
+from spot_history.core.osm_coords import load_osm_cities, load_osm_coords
 
 
 class FakeConnector(BaseConnector):
@@ -149,6 +149,30 @@ class ParserTest(unittest.TestCase):
             locations = osm_db.poi_locations(path, {("way", 123), ("way", 999)})
             self.assertEqual(set(locations), {("way", 123)})
             self.assertAlmostEqual(locations[("way", 123)]["lat"], 48.1001)
+
+    def test_load_osm_cities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "osm" / "osm.db"
+            conn = osm_db.open_db(path)
+            try:
+                osm_db.save_pois(
+                    conn,
+                    [
+                        poi(osm_id=123),
+                        osm_db.Poi(
+                            osm_type="node",
+                            osm_id=456,
+                            name="Nur Bezirk",
+                            lat=48.2,
+                            lng=11.6,
+                            tags={"addr:suburb": "Haidhausen"},
+                        ),
+                    ],
+                )
+            finally:
+                conn.close()
+            cities = load_osm_cities(path)
+            self.assertEqual(cities, {("way", 123): "München"})
 
     def test_parse_nominatim_results(self):
         payload = [
