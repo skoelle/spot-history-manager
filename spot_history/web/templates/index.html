@@ -88,9 +88,20 @@
             </select>
         </label>
         <label class="field">
-            <span>Kategorie</span>
+            <span>Hauptkategorie</span>
+            <select name="category_group">
+                <option value="">Alle Hauptkategorien</option>
+                {% for option in options.category_groups %}
+                <option value="{{ option.value }}" {% if option.value == query.category_group %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Unterkategorie</span>
             <select name="category">
-                <option value="">Alle Kategorien</option>
+                <option value="">Alle Unterkategorien</option>
                 {% for option in options.categories %}
                 <option value="{{ option.value }}" {% if option.value == query.category %}selected{% endif %}>
                     {{ option.value }} ({{ option.count }})
@@ -151,7 +162,7 @@
                     {% if visit.place_key %}<a href="/venues/{{ visit.place_key }}">{{ visit.place_name or 'Unbekannter Ort' }}</a>{% else %}{{ visit.place_name or 'Unbekannter Ort' }}{% endif %}
                 </div>
                 <div class="visit-sub">
-                    {% if visit.category %}{{ visit.category }}{% endif %}
+                    {% if visit.category_group %}<span {% if visit.category_group_source == 'name' %}title="aus Ortsname abgeleitet"{% endif %}>{% if visit.category_group_source == 'name' %}≈ {% endif %}{{ visit.category_group }}</span>{% if visit.category %} · {{ visit.category }}{% endif %}{% elif visit.category %}{{ visit.category }}{% endif %}
                     {% if visit.city %} · {{ visit.city }}{% endif %}
                     {% if visit.address %} · {{ visit.address }}{% endif %}
                 </div>

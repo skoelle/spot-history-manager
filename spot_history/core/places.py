@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .categories import resolve_category_group
 from .identity import OsmAssignment, osm_key
 from .identity import local_key as build_local_key
 
@@ -198,6 +199,14 @@ class CanonicalPlace:
     @property
     def category(self) -> str | None:
         return self.best("category")
+
+    @property
+    def category_group(self) -> str:
+        return resolve_category_group(self.category, self.name)[0]
+
+    @property
+    def category_group_source(self) -> str | None:
+        return resolve_category_group(self.category, self.name)[1]
 
     @property
     def address(self) -> str | None:

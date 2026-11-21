@@ -25,6 +25,7 @@ class DerivedConnector(BaseConnector):
             lng=None,
             place_name="Abgeleiteter Ort",
             source_place_id="p1",
+            category="Beer Garden",
         )
         yield Visit(
             source="fake",
@@ -94,6 +95,11 @@ class DerivedIndexTest(unittest.TestCase):
             self.assertEqual(derived[0]["properties"]["visit_id"], "derived")
             self.assertFalse(derived[0]["properties"]["has_coords"])
             self.assertEqual(derived[0]["properties"]["city"], "München")
+            self.assertEqual(derived[0]["properties"]["category"], "Beer Garden")
+            self.assertEqual(derived[0]["properties"]["category_group"], "Biergarten")
+            self.assertEqual(
+                derived[0]["properties"]["category_group_source"], "source"
+            )
             self.assertEqual(derived[0]["geometry"]["coordinates"], [11.5, 48.1])
 
             web_conn = web_data.connect(paths.index_db)

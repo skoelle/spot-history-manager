@@ -56,6 +56,8 @@ def feature_for_row(row, photos: list[str], sources: list[str] | None = None) ->
             "osm_lng": row["osm_lng"],
             "coords_source": coords_source,
             "category": row["category"],
+            "category_group": row["category_group"],
+            "category_group_source": row["category_group_source"],
             "visited_at": row["visited_at"],
             "visited_at_utc": iso_utc(row["visited_at"]),
             "local_datetime": row["local_datetime"],
@@ -150,6 +152,8 @@ CREATE TABLE canonical_places (
     lat REAL,
     lng REAL,
     category TEXT,
+    category_group TEXT,
+    category_group_source TEXT,
     address TEXT,
     city TEXT,
     state TEXT,
@@ -474,16 +478,19 @@ def build_index(
                     osm_lat, osm_lng = osm_coords_for_place
             cursor = conn.execute(
                 "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
-                "category, address, city, state, postal_code, country_code, "
-                "primary_source, sources_json, source_count, osm_type, osm_id, "
-                "osm_lat, osm_lng, match_status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "category, category_group, category_group_source, address, "
+                "city, state, postal_code, country_code, primary_source, "
+                "sources_json, source_count, osm_type, osm_id, osm_lat, osm_lng, "
+                "match_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
                     canonical.name,
                     lat,
                     lng,
                     canonical.category,
+                    canonical.category_group,
+                    canonical.category_group_source,
                     canonical.address,
                     canonical.city,
                     canonical.state,
@@ -633,7 +640,8 @@ def build_index(
             "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
             "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
             "p.osm_type, p.osm_id, p.match_status, "
-            "p.category, p.address, p.city, p.state, p.country_code, p.sources_json "
+            "p.category, p.category_group, p.category_group_source, "
+            "p.address, p.city, p.state, p.country_code, p.sources_json "
             "FROM visits v JOIN canonical_places p ON p.id = v.canonical_place_id "
             "WHERE COALESCE(p.osm_lat, p.lat) IS NOT NULL "
             "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL "

@@ -20,7 +20,7 @@
             <div>
                 <h2>{{ venue.name or 'Unbekannter Ort' }}</h2>
                 <div class="visit-sub">
-                    {% if venue.category %}{{ venue.category }}{% endif %}
+                    {% if venue.category_group %}<span {% if venue.category_group_source == 'name' %}title="aus Ortsname abgeleitet"{% endif %}>{% if venue.category_group_source == 'name' %}≈ {% endif %}{{ venue.category_group }}</span>{% if venue.category %} · {{ venue.category }}{% endif %}{% elif venue.category %}{{ venue.category }}{% endif %}
                     {% if venue.city %} · {{ venue.city }}{% endif %}
                     {% if venue.address %} · {{ venue.address }}{% endif %}
                 </div>
@@ -246,7 +246,7 @@
             <div class="visit-body">
                 <div class="visit-title">{{ visit.place_name or venue.name or 'Unbekannter Ort' }}</div>
                 <div class="visit-sub">
-                    {% if visit.category %}{{ visit.category }}{% endif %}
+                    {% if visit.category_group %}<span {% if visit.category_group_source == 'name' %}title="aus Ortsname abgeleitet"{% endif %}>{% if visit.category_group_source == 'name' %}≈ {% endif %}{{ visit.category_group }}</span>{% if visit.category %} · {{ visit.category }}{% endif %}{% elif visit.category %}{{ visit.category }}{% endif %}
                     {% if visit.city %} · {{ visit.city }}{% endif %}
                 </div>
                 {% if visit.note %}<div class="visit-note">„{{ visit.note }}“</div>{% endif %}

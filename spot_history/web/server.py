@@ -101,6 +101,7 @@ def index(
     request: Request,
     city: str | None = None,
     year: str | None = None,
+    category_group: str | None = None,
     category: str | None = None,
     source: str | None = None,
     q: str | None = None,
@@ -117,7 +118,7 @@ def index(
                 "index_path": str(index_db),
                 "visits": [],
                 "map_points": [],
-                "options": {"cities": [], "years": [], "categories": [], "sources": []},
+                "options": {"cities": [], "years": [], "category_groups": [], "categories": [], "sources": []},
                 "stats": {"total": 0, "with_photos": 0, "places": 0, "first_visit": None, "last_visit": None},
                 "built_at": None,
                 "total": 0,
@@ -146,6 +147,7 @@ def index(
         filters = web_data.Filters(
             city=city_value,
             year=(year or "").strip() or None,
+            category_group=(category_group or "").strip() or None,
             category=(category or "").strip() or None,
             source=(source or "").strip() or None,
             q=(q or "").strip() or None,
@@ -168,6 +170,7 @@ def index(
     query = {
         "city": city_value or "",
         "year": year or "",
+        "category_group": category_group or "",
         "category": category or "",
         "source": source or "",
         "q": q or "",
@@ -203,6 +206,7 @@ def index(
 def venues(
     request: Request,
     city: str | None = None,
+    category_group: str | None = None,
     category: str | None = None,
     source: str | None = None,
     q: str | None = None,
@@ -219,7 +223,7 @@ def venues(
                 "index_missing": True,
                 "index_path": str(index_db),
                 "venues": [],
-                "options": {"cities": [], "categories": [], "sources": []},
+                "options": {"cities": [], "category_groups": [], "categories": [], "sources": []},
                 "match_counts": {"all": 0, "osm": 0, "local": 0, "conflict": 0},
                 "total": 0,
                 "page": 1,
@@ -245,6 +249,7 @@ def venues(
         match_counts = web_data.load_venue_match_counts(conn)
         filters = web_data.VenueFilters(
             city=(city or "").strip() or None,
+            category_group=(category_group or "").strip() or None,
             category=(category or "").strip() or None,
             source=(source or "").strip() or None,
             q=(q or "").strip() or None,
@@ -261,6 +266,7 @@ def venues(
 
     query = {
         "city": city or "",
+        "category_group": category_group or "",
         "category": category or "",
         "source": source or "",
         "q": q or "",

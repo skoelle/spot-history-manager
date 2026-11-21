@@ -45,6 +45,10 @@
             `${escapeHtml(visit.date)} ${escapeHtml(visit.time)} <span class="badge source-${escapeHtml(visit.source)}">${escapeHtml(visit.source)}</span>`,
         ];
         const details = [];
+        if (visit.category_group) {
+            const inferred = visit.category_group_source === "name" ? "<span class=\"badge\">≈</span> " : "";
+            details.push(inferred + escapeHtml(visit.category_group));
+        }
         if (visit.category) {
             details.push(escapeHtml(visit.category));
         }

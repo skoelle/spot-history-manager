@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..core.categories import GROUP_RANK
 from ..core.config import ROOT
 from ..core.media import is_video, thumb_relpath
 
@@ -22,6 +23,7 @@ FROM = "FROM visits v LEFT JOIN canonical_places p ON p.id = v.canonical_place_i
 class Filters:
     city: str | None = None
     year: str | None = None
+    category_group: str | None = None
     category: str | None = None
     source: str | None = None
     q: str | None = None
@@ -31,6 +33,7 @@ class Filters:
 @dataclass(frozen=True)
 class VenueFilters:
     city: str | None = None
+    category_group: str | None = None
     category: str | None = None
     source: str | None = None
     q: str | None = None
@@ -61,6 +64,9 @@ def where_clause(filters: Filters) -> tuple[str, list]:
     if filters.year:
         clauses.append("strftime('%Y', v.visited_at, 'unixepoch') = ?")
         params.append(filters.year)
+    if filters.category_group:
+        clauses.append("p.category_group = ?")
+        params.append(filters.category_group)
     if filters.category:
         clauses.append("p.category = ?")
         params.append(filters.category)
@@ -73,12 +79,13 @@ def where_clause(filters: Filters) -> tuple[str, list]:
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
-            "(p.name LIKE ? OR p.category LIKE ? OR v.note LIKE ? "
+            "(p.name LIKE ? OR p.category LIKE ? OR p.category_group LIKE ? "
+            "OR v.note LIKE ? "
             "OR p.address LIKE ? OR p.city LIKE ? OR EXISTS ("
             "SELECT 1 FROM place_links pl WHERE pl.canonical_id = p.id "
             "AND pl.name LIKE ?))"
         )
-        params.extend([like, like, like, like, like, like])
+        params.extend([like, like, like, like, like, like, like])
     if not clauses:
         return "", params
     return " WHERE " + " AND ".join(clauses), params
@@ -95,6 +102,17 @@ def _options(conn: sqlite3.Connection, column: str, limit: int | None = None) ->
     return [dict(row) for row in conn.execute(sql)]
 
 
+def _sort_groups(options: list[dict]) -> list[dict]:
+    return sorted(
+        options,
+        key=lambda item: (
+            GROUP_RANK.get(item["value"], len(GROUP_RANK)),
+            -int(item["count"]),
+            item["value"],
+        ),
+    )
+
+
 def load_options(conn: sqlite3.Connection) -> dict:
     years = [
         dict(row)
@@ -106,6 +124,7 @@ def load_options(conn: sqlite3.Connection) -> dict:
     return {
         "cities": _options(conn, "p.city"),
         "years": years,
+        "category_groups": _sort_groups(_options(conn, "p.category_group")),
         "categories": _options(conn, "p.category", limit=80),
         "sources": _options(conn, "v.source"),
     }
@@ -149,6 +168,8 @@ def _format_row(row: sqlite3.Row) -> dict:
         "place_key": row["place_key"],
         "place_name": row["place_name"],
         "category": row["category"],
+        "category_group": row["category_group"],
+        "category_group_source": row["category_group_source"],
         "address": row["address"],
         "city": row["city"],
         "state": row["state"],
@@ -176,7 +197,8 @@ VISIT_SELECT = (
     "SELECT v.id, v.source, v.source_visit_id, v.visited_at, v.local_datetime, "
     "v.note, v.source_url, v.extra_json, v.has_coords, v.coords_derived, "
     "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
-    "p.category, p.address, p.city, p.state, p.country_code, "
+    "p.category, p.category_group, p.category_group_source, "
+    "p.address, p.city, p.state, p.country_code, "
     "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
     "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
     "(SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count "
@@ -227,6 +249,8 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "place_id": row["place_id"],
             "place_key": row["place_key"],
             "category": row["category"],
+            "category_group": row["category_group"],
+            "category_group_source": row["category_group_source"],
             "address": row["address"],
             "city": row["city"],
             "state": row["state"],
@@ -422,6 +446,9 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
     if filters.city:
         clauses.append("p.city = ?")
         params.append(filters.city)
+    if filters.category_group:
+        clauses.append("p.category_group = ?")
+        params.append(filters.category_group)
     if filters.category:
         clauses.append("p.category = ?")
         params.append(filters.category)
@@ -441,11 +468,12 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
-            "(p.name LIKE ? OR p.category LIKE ? OR p.address LIKE ? "
+            "(p.name LIKE ? OR p.category LIKE ? OR p.category_group LIKE ? "
+            "OR p.address LIKE ? "
             "OR p.city LIKE ? OR EXISTS (SELECT 1 FROM place_links pl "
             "WHERE pl.canonical_id = p.id AND pl.name LIKE ?))"
         )
-        params.extend([like, like, like, like, like])
+        params.extend([like, like, like, like, like, like])
     if not clauses:
         return "", params
     return " WHERE " + " AND ".join(clauses), params
@@ -473,6 +501,7 @@ def load_venue_options(conn: sqlite3.Connection) -> dict:
     ]
     return {
         "cities": _place_options(conn, "p.city"),
+        "category_groups": _sort_groups(_place_options(conn, "p.category_group")),
         "categories": _place_options(conn, "p.category", limit=80),
         "sources": sources,
     }
@@ -520,7 +549,8 @@ def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
 
 VENUE_SELECT = (
     "SELECT p.id, p.canonical_key, p.primary_source AS source, p.name, "
-    "p.category, p.address, p.city, p.state, p.postal_code, p.country_code, "
+    "p.category, p.category_group, p.category_group_source, "
+    "p.address, p.city, p.state, p.postal_code, p.country_code, "
     "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
     "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
     "p.sources_json, p.source_count, p.osm_type, p.osm_id, "
@@ -794,6 +824,8 @@ def _format_venue(
         "source_place_id": source_place_id,
         "name": row["name"],
         "category": row["category"],
+        "category_group": row["category_group"],
+        "category_group_source": row["category_group_source"],
         "address": row["address"],
         "city": row["city"],
         "state": row["state"],

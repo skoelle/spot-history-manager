@@ -32,9 +32,20 @@
             </select>
         </label>
         <label class="field">
-            <span>Kategorie</span>
+            <span>Hauptkategorie</span>
+            <select name="category_group">
+                <option value="">Alle Hauptkategorien</option>
+                {% for option in options.category_groups %}
+                <option value="{{ option.value }}" {% if option.value == query.category_group %}selected{% endif %}>
+                    {{ option.value }} ({{ option.count }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Unterkategorie</span>
             <select name="category">
-                <option value="">Alle Kategorien</option>
+                <option value="">Alle Unterkategorien</option>
                 {% for option in options.categories %}
                 <option value="{{ option.value }}" {% if option.value == query.category %}selected{% endif %}>
                     {{ option.value }} ({{ option.count }})
@@ -86,7 +97,7 @@
                 <tr>
                     <th>Name</th>
                     <th>Stadt</th>
-                    <th>Kategorie</th>
+                    <th>Hauptkategorie</th>
                     <th class="num">Besuche</th>
                     <th>Letzter Besuch</th>
                     <th>Quelle</th>
@@ -102,7 +113,9 @@
                         {% else %}<span class="badge">lokal</span>{% endif %}
                     </td>
                     <td>{{ venue.city or '—' }}</td>
-                    <td>{{ venue.category or '—' }}</td>
+                    <td>
+                        {% if venue.category_group %}<span {% if venue.category_group_source == 'name' %}title="aus Ortsname abgeleitet"{% endif %}>{% if venue.category_group_source == 'name' %}≈ {% endif %}{{ venue.category_group }}</span>{% if venue.category %}<span class="muted"> · {{ venue.category }}</span>{% endif %}{% else %}{{ venue.category or '—' }}{% endif %}
+                    </td>
                     <td class="num">{{ venue.visits_count }}</td>
                     <td>{{ venue.last_visit_label or '—' }}</td>
                     <td>

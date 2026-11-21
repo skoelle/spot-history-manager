@@ -91,10 +91,18 @@ gefahrlos gelöscht werden. Nur die Regel-DB bleibt dauerhaft.
 
 `./web.sh` startet FastAPI/Jinja auf `http://<host>:8345` (Bind `0.0.0.0`).
 Die Seite zeigt standardmäßig alle Besuche in München, mit Filtern für Stadt,
-Jahr, Kategorie, Quelle und Freitext. Oben eine Leaflet-Karte mit
-OpenStreetMap-Tiles (Leaflet liegt lokal unter
+Jahr, Hauptkategorie, Unterkategorie, Quelle und Freitext. Oben eine
+Leaflet-Karte mit OpenStreetMap-Tiles (Leaflet liegt lokal unter
 `spot_history/web/static/vendor/leaflet/`), darunter die Liste mit 60 Treffern
 pro Seite. Klick auf Karte und Liste ist synchronisiert.
+
+Die Fein-Kategorien (z. B. `German Restaurant`, `Café`, `Beer Garden`) werden
+beim Index-Build in Hauptkategorien zusammengefasst (`Restaurants`, `Cafés`,
+`Biergarten`, `Bars & Nightlife`, `Kultur & Sehenswürdigkeiten`, ...). Die
+Feinkategorie bleibt als Unterkategorie erhalten. Foursquare liefert die
+Feinkategorie; Yelp enthält im Export keine Ortskategorie. Bei Orten ohne
+Kategorie wird die Hauptkategorie konservativ aus dem Ortsnamen abgeleitet und
+in der UI mit `≈` markiert. Ohne Treffer bleibt `Ohne Kategorie`.
 
 Zusätzlich gibt es eine Profilkarte mit lokal gespeichertem Avatar sowie eine
 Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{key}`.
@@ -158,8 +166,9 @@ gedacht.
 - `places` – quellenspezifische Orte (`source`, `source_place_id`)
 - `place_details` – Kontakt, Social-Media, Kategorien und Datenstand je Ort
 - `canonical_places` – ein Ort pro realem Ort, aggregiert über Quellen, inkl.
-  `canonical_key`, `osm_type`, `osm_id`, `match_status` sowie `osm_lat`/`osm_lng`
-  aus dem OSM-Cache
+  `canonical_key`, `category`/`category_group`/`category_group_source`,
+  `osm_type`, `osm_id`, `match_status` sowie `osm_lat`/`osm_lng` aus dem
+  OSM-Cache
 - `canonical_aliases` – frühere Keys für Redirects auf den aktuellen Key
 - `place_links` – Quell-Identitäten und Links je kanonischem Ort
 - `merge_candidates` – nicht automatisch angewandte Merge-Vorschläge
@@ -171,9 +180,9 @@ gedacht.
 - `index_meta` – Build-Zeitpunkt
 
 `visits.geojson` ist eine `FeatureCollection` mit einem Punkt pro Visit
-(Koordinaten als `[lng, lat]`), inklusive Quelle, Ort, Kategorie, Zeit,
-kanonischem Ort, Quellenliste und lokalen Fotopfaden. Das reicht für
-Leaflet/MapLibre mit OSM-Tiles.
+(Koordinaten als `[lng, lat]`), inklusive Quelle, Ort, Kategorie,
+Hauptkategorie, Zeit, kanonischem Ort, Quellenliste und lokalen Fotopfaden. Das
+reicht für Leaflet/MapLibre mit OSM-Tiles.
 
 ## Zusammengeführte Orte
 

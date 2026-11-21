@@ -279,8 +279,21 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(web_data.count_visits(self.conn, berlin), 1)
         beer = web_data.Filters(category="Beer Garden")
         self.assertEqual(web_data.count_visits(self.conn, beer), 1)
+        beer_group = web_data.Filters(category_group="Biergarten")
+        self.assertEqual(web_data.count_visits(self.conn, beer_group), 1)
         search = web_data.Filters(q="Berlin")
         self.assertEqual(web_data.count_visits(self.conn, search), 1)
+        options = web_data.load_options(self.conn)
+        self.assertIn(
+            "Biergarten",
+            [group["value"] for group in options["category_groups"]],
+        )
+        self.assertEqual(
+            web_data.count_venues(
+                self.conn, web_data.VenueFilters(category_group="Biergarten")
+            ),
+            1,
+        )
 
     def test_profiles_and_venues(self):
         profiles = web_data.load_profiles(self.conn)
