@@ -792,6 +792,16 @@ button:hover,
         height: 320px;
     }
 
+    .venue-top {
+        grid-template-columns: 1fr;
+    }
+
+    .venue-top .venue-map {
+        flex: none;
+        height: 260px;
+        min-height: 260px;
+    }
+
     .header {
         align-items: flex-start;
     }
@@ -871,6 +881,34 @@ button:hover,
 
 .button.danger:hover {
     background: #8a2424;
+}
+
+.venue-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: 1rem;
+    align-items: stretch;
+    margin-bottom: 1.5rem;
+}
+
+.venue-top-single {
+    grid-template-columns: 1fr;
+}
+
+.venue-top .venue-detail,
+.venue-top .venue-map-box {
+    margin-bottom: 0;
+}
+
+.venue-top .venue-map-box {
+    display: flex;
+    flex-direction: column;
+}
+
+.venue-top .venue-map {
+    flex: 1 1 auto;
+    min-height: 280px;
+    height: auto;
 }
 
 .venue-map-box {
