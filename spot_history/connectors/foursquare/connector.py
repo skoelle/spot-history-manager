@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
-from ..base import BaseConnector, Visit
 from ...core.config import ROOT
+from ..base import BaseConnector, Visit
 
 SOURCE = "foursquare"
 
@@ -312,12 +313,38 @@ class FoursquareConnector(BaseConnector):
                         taken_at=row["created_at"],
                     )
                 )
+            comments: dict[str, list[str]] = {}
+            for row in conn.execute(
+                "SELECT checkin_id, user_display_name, text FROM checkin_comments "
+                "ORDER BY checkin_id, created_at, id"
+            ):
+                text = (row["text"] or "").strip()
+                if not text:
+                    continue
+                author = (row["user_display_name"] or "").strip()
+                comments.setdefault(row["checkin_id"], []).append(
+                    f"{author}: {text}" if author else text
+                )
+            likes: dict[str, list[str]] = {}
+            for row in conn.execute(
+                "SELECT checkin_id, display_name FROM likes "
+                "ORDER BY checkin_id, display_name"
+            ):
+                name = (row["display_name"] or "").strip()
+                if name:
+                    likes.setdefault(row["checkin_id"], []).append(name)
             rows = conn.execute(
                 "SELECT id, created_at, lat, lng, venue_id, venue_name, category_name, "
                 "address, city, state, postal_code, country_code, shout, canonical_url, "
                 "time_zone_offset, time_zone FROM checkins ORDER BY created_at"
             )
             for row in rows:
+                extra: dict[str, object] = {}
+                if comments.get(row["id"]):
+                    extra["comments"] = comments[row["id"]]
+                if likes.get(row["id"]):
+                    extra["like_count"] = len(likes[row["id"]])
+                    extra["likes"] = likes[row["id"]]
                 yield Visit(
                     source=SOURCE,
                     source_visit_id=row["id"],
@@ -341,6 +368,7 @@ class FoursquareConnector(BaseConnector):
                     tz_offset=row["time_zone_offset"],
                     time_zone=row["time_zone"],
                     photos=photos.get(row["id"], []),
+                    extra=extra or None,
                 )
         finally:
             conn.close()
@@ -386,6 +414,182 @@ class FoursquareConnector(BaseConnector):
                     "has_related": row["has_related"],
                     "fetched_at": row["fetched_at"],
                     "updated_at": row["updated_at"],
+                }
+        finally:
+            conn.close()
+
+    def iter_records(self):
+        from .config import build_config
+
+        config = build_config(require_token=False)
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            return
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+
+        def date_label(value):
+            if not value:
+                return None
+            try:
+                return datetime.fromtimestamp(
+                    int(value), timezone.utc
+                ).strftime("%d.%m.%Y")
+            except (TypeError, ValueError, OSError):
+                return None
+
+        def iso_timestamp(value):
+            if not value:
+                return None
+            try:
+                moment = datetime.fromisoformat(str(value))
+            except ValueError:
+                return None
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            return int(moment.timestamp())
+
+        try:
+            for row in conn.execute("SELECT * FROM tips ORDER BY created_at"):
+                yield {
+                    "source": SOURCE,
+                    "record_id": f"tip:{row['id']}",
+                    "kind": "tip",
+                    "source_place_id": row["venue_id"],
+                    "created_at": row["created_at"],
+                    "payload": {
+                        "tip_id": row["id"],
+                        "venue_name": row["venue_name"],
+                        "text": row["text"],
+                        "canonical_url": row["canonical_url"],
+                        "lang": row["lang"],
+                        "saves_count": row["saves_count"],
+                        "title": row["title"],
+                    },
+                }
+
+            items_by_list: dict[str, list[dict]] = {}
+            for item in conn.execute(
+                "SELECT list_id, venue_id, venue_name, note FROM list_items "
+                "ORDER BY venue_name, venue_id"
+            ):
+                items_by_list.setdefault(item["list_id"], []).append(
+                    {
+                        "venue_id": item["venue_id"],
+                        "venue_name": item["venue_name"],
+                        "note": item["note"],
+                    }
+                )
+            for row in conn.execute("SELECT * FROM lists ORDER BY name"):
+                items = items_by_list.get(row["id"], [])
+                yield {
+                    "source": SOURCE,
+                    "record_id": f"list:{row['id']}",
+                    "kind": "list",
+                    "source_place_id": None,
+                    "created_at": iso_timestamp(row["updated_at"]),
+                    "payload": {
+                        "list_id": row["id"],
+                        "name": row["name"],
+                        "type": row["type"],
+                        "visibility": row["visibility"],
+                        "count": row["count"],
+                        "item_count": len(items),
+                        "items": items,
+                    },
+                }
+
+            for row in conn.execute("SELECT * FROM tastes ORDER BY text"):
+                yield {
+                    "source": SOURCE,
+                    "record_id": f"taste:{row['id']}",
+                    "kind": "taste",
+                    "source_place_id": None,
+                    "created_at": None,
+                    "payload": {
+                        "taste_id": row["id"],
+                        "text": row["text"],
+                        "on_user": bool(row["on_user"]),
+                    },
+                }
+
+            comments: dict[str, list[dict]] = {}
+            meta: dict[str, dict] = {}
+            for row in conn.execute(
+                "SELECT c.id, c.checkin_id, c.created_at, c.user_display_name, "
+                "c.text, ch.venue_id, ch.venue_name FROM checkin_comments c "
+                "JOIN checkins ch ON ch.id = c.checkin_id "
+                "ORDER BY c.created_at, c.id"
+            ):
+                checkin_id = row["checkin_id"]
+                meta.setdefault(
+                    checkin_id,
+                    {
+                        "venue_id": row["venue_id"],
+                        "venue_name": row["venue_name"],
+                    },
+                )
+                comments.setdefault(checkin_id, []).append(
+                    {
+                        "id": row["id"],
+                        "author": row["user_display_name"],
+                        "text": row["text"],
+                        "created_at": row["created_at"],
+                        "date": date_label(row["created_at"]),
+                    }
+                )
+            for checkin_id, rows in comments.items():
+                info = meta.get(checkin_id) or {}
+                created_at = max(
+                    (int(row["created_at"]) for row in rows if row["created_at"]),
+                    default=None,
+                )
+                yield {
+                    "source": SOURCE,
+                    "record_id": f"comments:{checkin_id}",
+                    "kind": "foursquare_comment",
+                    "source_place_id": info.get("venue_id"),
+                    "created_at": created_at,
+                    "payload": {
+                        "checkin_id": checkin_id,
+                        "venue_name": info.get("venue_name"),
+                        "comments": rows,
+                    },
+                }
+
+            likes: dict[str, list[str]] = {}
+            like_meta: dict[str, dict] = {}
+            for row in conn.execute(
+                "SELECT l.checkin_id, l.display_name, ch.venue_id, ch.venue_name, "
+                "ch.created_at FROM likes l "
+                "JOIN checkins ch ON ch.id = l.checkin_id "
+                "ORDER BY l.display_name, l.user_id"
+            ):
+                checkin_id = row["checkin_id"]
+                like_meta.setdefault(
+                    checkin_id,
+                    {
+                        "venue_id": row["venue_id"],
+                        "venue_name": row["venue_name"],
+                        "created_at": row["created_at"],
+                    },
+                )
+                if row["display_name"]:
+                    likes.setdefault(checkin_id, []).append(row["display_name"])
+            for checkin_id, people in likes.items():
+                info = like_meta.get(checkin_id) or {}
+                yield {
+                    "source": SOURCE,
+                    "record_id": f"likes:{checkin_id}",
+                    "kind": "foursquare_like",
+                    "source_place_id": info.get("venue_id"),
+                    "created_at": info.get("created_at"),
+                    "payload": {
+                        "checkin_id": checkin_id,
+                        "venue_name": info.get("venue_name"),
+                        "count": len(people),
+                        "people": people,
+                    },
                 }
         finally:
             conn.close()

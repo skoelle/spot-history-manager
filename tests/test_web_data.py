@@ -305,6 +305,106 @@ class CommentConnector(BaseConnector):
         )
 
 
+class FoursquareActivityConnector(BaseConnector):
+    name = "foursquare"
+    kind = "sync"
+
+    def iter_records(self):
+        yield {
+            "source": "foursquare",
+            "record_id": "tip:t1",
+            "kind": "tip",
+            "source_place_id": "v1",
+            "created_at": 1700000000,
+            "payload": {
+                "venue_name": "Michaeligarten",
+                "text": "Sehr guter Steckerlfisch",
+                "canonical_url": "https://foursquare.com/tip/t1",
+                "lang": "de",
+                "saves_count": 2,
+                "title": "Stefan's tip",
+            },
+        }
+        yield {
+            "source": "foursquare",
+            "record_id": "list:l1",
+            "kind": "list",
+            "source_place_id": None,
+            "created_at": 1700000000,
+            "payload": {
+                "name": "München",
+                "type": "created",
+                "visibility": "public",
+                "count": 2,
+                "item_count": 2,
+                "items": [
+                    {"venue_id": "v1", "venue_name": "Michaeligarten", "note": ""},
+                    {"venue_id": "v2", "venue_name": "Nicht besucht", "note": None},
+                ],
+            },
+        }
+        yield {
+            "source": "foursquare",
+            "record_id": "comments:c1",
+            "kind": "foursquare_comment",
+            "source_place_id": "v1",
+            "created_at": 1700000000,
+            "payload": {
+                "checkin_id": "c1",
+                "venue_name": "Michaeligarten",
+                "comments": [
+                    {
+                        "id": "cc1",
+                        "author": "Alex",
+                        "text": "Prost",
+                        "created_at": 1700000000,
+                        "date": "14.11.2023",
+                    }
+                ],
+            },
+        }
+        yield {
+            "source": "foursquare",
+            "record_id": "likes:c1",
+            "kind": "foursquare_like",
+            "source_place_id": "v1",
+            "created_at": 1700000000,
+            "payload": {
+                "checkin_id": "c1",
+                "venue_name": "Michaeligarten",
+                "count": 2,
+                "people": ["Alex", "Sam"],
+            },
+        }
+        yield {
+            "source": "foursquare",
+            "record_id": "taste:ta1",
+            "kind": "taste",
+            "source_place_id": None,
+            "created_at": None,
+            "payload": {"text": "Espresso", "on_user": True},
+        }
+
+    def iter_visits(self):
+        yield Visit(
+            source="foursquare",
+            source_visit_id="c1",
+            visited_at=1700000000,
+            lat=48.1,
+            lng=11.5,
+            place_name="Michaeligarten",
+            source_place_id="v1",
+            category="Beer Garden",
+            city="München",
+            country_code="DE",
+            extra={
+                "comments": ["Alex: Prost"],
+                "like_count": 2,
+                "likes": ["Alex", "Sam"],
+            },
+        )
+
+
 class WebDataTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -626,6 +726,47 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(by_numeric["key"], key)
 
         self.assertIsNone(web_data.get_venue_by_key(self.conn, "osm-way-1"))
+
+    def test_foursquare_activity_and_venue_tips(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {"foursquare": FoursquareActivityConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                groups = web_data.load_foursquare_activity(conn)
+                visits = web_data.query_visits(
+                    conn, web_data.Filters(source="foursquare"), limit=10, offset=0
+                )
+                venue = web_data.get_venue_by_key(conn, "foursquare:v1")
+            finally:
+                conn.close()
+
+        self.assertEqual(
+            [group["kind"] for group in groups],
+            ["tip", "list", "foursquare_comment", "foursquare_like", "taste"],
+        )
+        tip = groups[0]["records"][0]
+        self.assertEqual(tip["payload"]["text"], "Sehr guter Steckerlfisch")
+        self.assertTrue(tip["place_key"])
+        listing = groups[1]["records"][0]
+        self.assertEqual(listing["payload"]["name"], "München")
+        self.assertTrue(listing["payload"]["items"][0]["place_key"])
+        self.assertIsNone(listing["payload"]["items"][1]["place_key"])
+        self.assertEqual(
+            groups[2]["records"][0]["payload"]["comments"][0]["author"], "Alex"
+        )
+        self.assertEqual(groups[3]["records"][0]["payload"]["people"], ["Alex", "Sam"])
+        self.assertEqual(groups[4]["records"][0]["payload"]["text"], "Espresso")
+
+        self.assertEqual(visits[0]["comments"], ["Alex: Prost"])
+        self.assertEqual(visits[0]["like_count"], 2)
+        self.assertEqual(visits[0]["likes"], ["Alex", "Sam"])
+        self.assertIsNotNone(venue)
+        self.assertEqual(venue["records"]["tip"][0]["payload"]["venue_name"], "Michaeligarten")
 
     def test_activity_groups_records(self):
         groups = web_data.load_activity(self.conn, source="fake")

@@ -101,6 +101,28 @@
     {% endif %}
     </div>
 
+    {% set venue_tips = venue.records.get('tip', []) %}
+    {% if venue_tips %}
+    <div class="box foursquare-tips">
+        <div class="box-title">Foursquare-Tips · {{ venue_tips|length }}</div>
+        <ul class="record-list">
+            {% for item in venue_tips %}
+            <li class="record-item">
+                {% if item.payload.text %}<div class="record-text">{{ item.payload.text }}</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.lang %}<span>{{ item.payload.lang }}</span>{% endif %}
+                    {% if item.payload.saves_count %}<span>{{ item.payload.saves_count }} Saves</span>{% endif %}
+                    {% if item.payload.canonical_url %}
+                    <a href="{{ item.payload.canonical_url }}" target="_blank" rel="noopener">Original</a>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     {% set survey_answers = venue.records.get('survey_answer', []) %}
     {% set interactions = venue.records.get('business_interaction', []) %}
     {% set no_checkin_photos = venue.records.get('unlinked_photo', []) %}
@@ -356,6 +378,9 @@
                 {% if visit.is_comment_only %}<span class="badge">Kommentar</span>{% endif %}
                 {% if visit.photo_count %}
                 <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
+                {% endif %}
+                {% if visit.like_count %}
+                <span class="badge" {% if visit.likes %}title="{{ visit.likes|join(', ') }}"{% endif %}>{{ visit.like_count }} Like{% if visit.like_count != 1 %}s{% endif %}</span>
                 {% endif %}
                 <span class="visit-time">{{ visit.time }}{% if visit.end_time %}–{{ visit.end_time }}{% endif %}</span>
                 {% if visit.duration %}<span class="badge visit-duration" title="Aufenthaltsdauer">{{ visit.duration }}</span>{% endif %}

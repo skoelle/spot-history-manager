@@ -257,6 +257,10 @@ def _format_row(row: sqlite3.Row) -> dict:
         "coords_derived": bool(row["coords_derived"]),
         "is_comment_only": bool(extra.get("comment_only")),
         "comments": [text for text in comments if text],
+        "like_count": int(extra.get("like_count") or 0),
+        "likes": [
+            str(name) for name in (extra.get("likes") or []) if name
+        ],
     }
 
 
@@ -798,11 +802,20 @@ def _details_for_links(conn: sqlite3.Connection, links: list[dict]) -> dict:
 
 
 VENUE_RECORD_KINDS = (
+    "tip",
     "survey_answer",
     "business_interaction",
     "unlinked_photo",
     "review",
     "saved_place",
+)
+
+FOURSQUARE_ACTIVITY_ORDER = (
+    ("tip", "Tipps"),
+    ("list", "Listen"),
+    ("foursquare_comment", "Kommentare"),
+    ("foursquare_like", "Likes"),
+    ("taste", "Tastes"),
 )
 
 ACTIVITY_ORDER = (
@@ -934,6 +947,60 @@ def split_activity(groups: list[dict]) -> dict:
         "profile_photo": profile_photo,
         "groups": remaining,
     }
+
+
+def _place_keys_for_source(
+    conn: sqlite3.Connection, source: str, source_place_ids: list[str]
+) -> dict[str, str]:
+    unique = sorted({str(value) for value in source_place_ids if value})
+    if not unique:
+        return {}
+    placeholders = ", ".join("?" for _ in unique)
+    try:
+        rows = conn.execute(
+            "SELECT pl.source_place_id, cp.canonical_key "
+            "FROM place_links pl JOIN canonical_places cp ON cp.id = pl.canonical_id "
+            f"WHERE pl.source = ? AND pl.source_place_id IN ({placeholders})",
+            [source, *unique],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {row["source_place_id"]: row["canonical_key"] for row in rows}
+
+
+def load_foursquare_activity(conn: sqlite3.Connection) -> list[dict]:
+    kinds = tuple(kind for kind, _ in FOURSQUARE_ACTIVITY_ORDER)
+    sql = (
+        "SELECT source, record_id, kind, source_place_id, created_at, payload_json "
+        "FROM source_records WHERE source = 'foursquare' "
+        f"AND kind IN ({', '.join('?' for _ in kinds)}) "
+        "ORDER BY created_at DESC, record_id"
+    )
+    try:
+        rows = conn.execute(sql, list(kinds)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    grouped: dict[str, list[dict]] = {}
+    place_ids: list[str] = []
+    for row in rows:
+        record = _record_row(row)
+        grouped.setdefault(row["kind"], []).append(record)
+        if record.get("source_place_id"):
+            place_ids.append(record["source_place_id"])
+        for item in record["payload"].get("items") or []:
+            if item.get("venue_id"):
+                place_ids.append(item["venue_id"])
+    place_keys = _place_keys_for_source(conn, "foursquare", place_ids)
+    for records in grouped.values():
+        for record in records:
+            record["place_key"] = place_keys.get(record.get("source_place_id"))
+            for item in record["payload"].get("items") or []:
+                item["place_key"] = place_keys.get(item.get("venue_id"))
+    return [
+        {"kind": kind, "label": label, "records": grouped.get(kind, [])}
+        for kind, label in FOURSQUARE_ACTIVITY_ORDER
+        if grouped.get(kind)
+    ]
 
 
 def load_activity(conn: sqlite3.Connection, source: str = "yelp") -> list[dict]:

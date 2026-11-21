@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Foursquare – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set active_page = 'foursquare' %}
+{% set header_meta %}Foursquare{% endset %}
+<div class="container">
+    {% include "_header.html" %}
+
+    {% if index_missing %}
+    <div class="empty-state">
+        Der Index fehlt unter <code>{{ index_path }}</code>.<br>
+        Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
+    </div>
+    {% else %}
+    <p class="hint">
+        Tips, Listen, Tastes sowie Kommentare und Likes aus den Foursquare-Check-ins.
+        Die Venue-History wird nicht separat angezeigt, da sie sich mit den Check-ins überschneidet.
+    </p>
+
+    {% if profile %}
+    <div class="profile-card box">
+        <div class="profile-avatar">
+            {% if profile.photo_path %}
+            <img src="/media/{{ profile.photo_path }}" alt="">
+            {% else %}
+            <span>{{ profile.initials }}</span>
+            {% endif %}
+        </div>
+        <div class="profile-body">
+            <div class="profile-name">{{ profile.display_name }}</div>
+            {% if profile.home_city %}<div class="profile-city">{{ profile.home_city }}</div>{% endif %}
+            <div class="profile-counts">
+                <span><strong>{{ profile.counts.get('checkins', 0) }}</strong> Check-ins</span>
+                <a href="/photos?source=foursquare"><strong>{{ profile.counts.get('photos', 0) }}</strong> Fotos</a>
+                <span><strong>{{ profile.counts.get('tips', 0) }}</strong> Tipps</span>
+                <span><strong>{{ profile.counts.get('lists', 0) }}</strong> Listen</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% for group in groups %}
+    <details class="box activity-group">
+        <summary class="box-title activity-summary">
+            <span>{{ group.label }}</span>
+            <span class="activity-count">{{ group.records|length }}</span>
+        </summary>
+        {% if group.kind == 'list' %}
+        <div class="record-list">
+            {% for item in group.records %}
+            <div class="record-item">
+                <div class="record-main">{{ item.payload.name or 'Unbenannte Liste' }}</div>
+                <div class="record-meta">
+                    {% if item.payload.type == 'created' %}<span>Eigene Liste</span>
+                    {% elif item.payload.type == 'followed' %}<span>Gefolgte Liste</span>
+                    {% elif item.payload.type == 'liked' %}<span>Favoriten</span>
+                    {% elif item.payload.type == 'todos' %}<span>Gespeicherte Orte</span>
+                    {% elif item.payload.type %}<span>{{ item.payload.type }}</span>{% endif %}
+                    {% if item.payload.visibility %}<span>{{ item.payload.visibility }}</span>{% endif %}
+                    {% if item.payload.item_count %}<span>{{ item.payload.item_count }} Einträge</span>{% endif %}
+                    {% if item.payload['count'] and item.payload.item_count < item.payload['count'] %}
+                    <span>API: {{ item.payload['count'] }}</span>
+                    {% endif %}
+                </div>
+                {% if item.payload['items'] %}
+                <ul class="record-list">
+                    {% for entry in item.payload['items'] %}
+                    <li class="record-item">
+                        <div class="record-main">
+                            {% if entry.place_key %}
+                            <a href="/venues/{{ entry.place_key }}">{{ entry.venue_name or entry.venue_id }}</a>
+                            {% elif entry.venue_id %}
+                            <a href="https://foursquare.com/v/{{ entry.venue_id }}" target="_blank" rel="noopener">{{ entry.venue_name or entry.venue_id }}</a>
+                            {% else %}
+                            {{ entry.venue_name or 'Unbekannter Ort' }}
+                            {% endif %}
+                        </div>
+                        {% if entry.note %}<div class="record-text">{{ entry.note }}</div>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% elif group.kind == 'foursquare_comment' %}
+        <ul class="record-list">
+            {% for item in group.records %}
+            <li class="record-item">
+                <div class="record-main">
+                    {% if item.place_key %}
+                    <a href="/venues/{{ item.place_key }}">{{ item.payload.venue_name or 'Unbekannter Ort' }}</a>
+                    {% else %}
+                    {{ item.payload.venue_name or 'Unbekannter Ort' }}
+                    {% endif %}
+                </div>
+                {% for comment in item.payload.comments %}
+                <div class="record-text">
+                    {% if comment.author %}<strong>{{ comment.author }}:</strong> {% endif %}{{ comment.text }}
+                </div>
+                {% if comment.date %}<div class="record-meta"><span>{{ comment.date }}</span></div>{% endif %}
+                {% endfor %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% elif group.kind == 'foursquare_like' %}
+        <ul class="record-list">
+            {% for item in group.records %}
+            <li class="record-item">
+                <div class="record-main">
+                    {% if item.place_key %}
+                    <a href="/venues/{{ item.place_key }}">{{ item.payload.venue_name or 'Unbekannter Ort' }}</a>
+                    {% else %}
+                    {{ item.payload.venue_name or 'Unbekannter Ort' }}
+                    {% endif %}
+                    {% if item.payload['count'] %} · {{ item.payload['count'] }} Likes{% endif %}
+                </div>
+                {% if item.payload['people'] %}
+                <div class="record-text">{{ item.payload['people']|join(', ') }}</div>
+                {% endif %}
+                {% if item.date %}<div class="record-meta"><span>{{ item.date }}</span></div>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <ul class="record-list">
+            {% for item in group.records %}
+            <li class="record-item">
+                {% if group.kind == 'tip' %}
+                <div class="record-main">
+                    {% if item.place_key %}
+                    <a href="/venues/{{ item.place_key }}">{{ item.payload.venue_name or 'Unbekannter Ort' }}</a>
+                    {% else %}
+                    {{ item.payload.venue_name or 'Unbekannter Ort' }}
+                    {% endif %}
+                </div>
+                {% if item.payload.text %}<div class="record-text">{{ item.payload.text }}</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.lang %}<span>{{ item.payload.lang }}</span>{% endif %}
+                    {% if item.payload.saves_count %}<span>{{ item.payload.saves_count }} Saves</span>{% endif %}
+                    {% if item.payload.canonical_url %}
+                    <a href="{{ item.payload.canonical_url }}" target="_blank" rel="noopener">Original</a>
+                    {% endif %}
+                </div>
+                {% elif group.kind == 'taste' %}
+                <div class="record-main">{{ item.payload.text or 'Taste' }}</div>
+                <div class="record-meta">
+                    {% if item.payload.on_user %}<span>Im Profil</span>{% endif %}
+                </div>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </details>
+    {% else %}
+    <div class="empty-state">Keine Foursquare-Daten im Index.</div>
+    {% endfor %}
+    {% endif %}
+</div>
+{% include "_lightbox.html" %}
+</body>
+</html>

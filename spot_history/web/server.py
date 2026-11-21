@@ -676,8 +676,8 @@ async def unmerge_venue(request: Request, key: str) -> RedirectResponse:
     return _redirect_venue(updated["key"], assign_ok="Ort getrennt.")
 
 
-@app.get("/aktivitaet", response_class=HTMLResponse)
-def activity(request: Request) -> HTMLResponse:
+@app.get("/yelp", response_class=HTMLResponse)
+def yelp_activity(request: Request) -> HTMLResponse:
     index_db = paths.index_db
     if not index_db.exists():
         return templates.TemplateResponse(
@@ -716,6 +716,49 @@ def activity(request: Request) -> HTMLResponse:
             "profile_name": activity["profile_name"],
             "profile_facts": activity["profile_facts"],
             "profile_photo": activity["profile_photo"],
+            "profile": profile,
+        },
+    )
+
+
+@app.get("/aktivitaet", include_in_schema=False)
+def legacy_activity() -> RedirectResponse:
+    return RedirectResponse("/yelp", status_code=301)
+
+
+@app.get("/foursquare", response_class=HTMLResponse)
+def foursquare_activity(request: Request) -> HTMLResponse:
+    index_db = paths.index_db
+    if not index_db.exists():
+        return templates.TemplateResponse(
+            request,
+            "foursquare.html",
+            {
+                "request": request,
+                "index_missing": True,
+                "index_path": str(index_db),
+                "groups": [],
+                "profile": None,
+            },
+        )
+    conn = web_data.connect(index_db)
+    try:
+        profiles = web_data.load_profiles(conn)
+        profile = next(
+            (item for item in profiles if item["source"] == "foursquare"),
+            profiles[0] if profiles else None,
+        )
+        groups = web_data.load_foursquare_activity(conn)
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "foursquare.html",
+        {
+            "request": request,
+            "index_missing": False,
+            "index_path": str(index_db),
+            "groups": groups,
             "profile": profile,
         },
     )
