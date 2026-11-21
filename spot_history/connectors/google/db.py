@@ -457,7 +457,7 @@ class Database:
     def clusters_for_enrichment(self) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT cluster_key, lat, lng, semantic_type, name, name_source, "
-            "address, representative_place_id, osm_id FROM clusters "
+            "address, representative_place_id, osm_id, enriched_at FROM clusters "
             "WHERE lat IS NOT NULL AND lng IS NOT NULL "
             "AND COALESCE(semantic_type, '') NOT IN ('Home', 'Work', 'Inferred Work') "
             "ORDER BY visit_count DESC"

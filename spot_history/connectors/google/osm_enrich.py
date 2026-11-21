@@ -17,6 +17,7 @@ from ..osm.overpass import (
 from . import db as google_db
 from .config import GoogleConfig
 from .scoring import (
+    NOMINATIM_OSM_MAX_DISTANCE_M,
     PoiCandidate,
     decide,
     is_valid_poi,
@@ -37,6 +38,7 @@ class EnrichSummary:
     overpass_pois: int = 0
     nominatim_queries: int = 0
     auto_named: int = 0
+    osm_from_nominatim: int = 0
     candidates: int = 0
     addresses: int = 0
     unmatched: int = 0
@@ -185,6 +187,40 @@ def _apply_osm_name(
     db.clear_candidates(cluster["cluster_key"])
 
 
+def _nominatim_distance(cluster: dict, info: dict) -> float | None:
+    lat = info.get("lat")
+    lng = info.get("lng")
+    cluster_lat = cluster.get("lat")
+    cluster_lng = cluster.get("lng")
+    if None in (lat, lng, cluster_lat, cluster_lng):
+        return None
+    try:
+        return haversine_m(
+            float(cluster_lat), float(cluster_lng), float(lat), float(lng)
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _nominatim_osm_ref(
+    cluster: dict, info: dict
+) -> tuple[str, int, float] | None:
+    osm_type = info.get("osm_type")
+    osm_id = info.get("osm_id")
+    if osm_type not in ("node", "way", "relation") or osm_id is None:
+        return None
+    try:
+        clean_id = int(osm_id)
+    except (TypeError, ValueError):
+        return None
+    if clean_id <= 0:
+        return None
+    distance = _nominatim_distance(cluster, info)
+    if distance is None or distance > NOMINATIM_OSM_MAX_DISTANCE_M:
+        return None
+    return osm_type, clean_id, distance
+
+
 def _apply_nominatim(
     db: google_db.Database,
     cluster: dict,
@@ -194,6 +230,13 @@ def _apply_nominatim(
 ) -> tuple[str, dict]:
     info = nominatim_candidate(payload)
     if info["name"]:
+        osm_ref = _nominatim_osm_ref(cluster, info)
+        osm_type = osm_id = distance = None
+        if osm_ref is not None:
+            osm_type, osm_id, distance = osm_ref
+            info["distance_m"] = round(distance, 1)
+        info["osm_type"] = osm_type
+        info["osm_id"] = osm_id
         if not dry_run:
             db.update_cluster_enrichment(
                 cluster["cluster_key"],
@@ -203,6 +246,9 @@ def _apply_nominatim(
                 country_code=info["country_code"],
                 category=info["category"],
                 name_source="nominatim",
+                osm_type=osm_type,
+                osm_id=osm_id,
+                distance_m=distance,
             )
         return "named", info
     if info["address"]:
@@ -251,6 +297,14 @@ def enrich(
         for cluster in clusters:
             name_source = cluster.get("name_source")
             if name_source in ("manual", "semantic", "source"):
+                summary.skipped += 1
+                continue
+            if (
+                name_source == "address"
+                and cluster.get("osm_id") is None
+                and cluster.get("enriched_at")
+                and not force
+            ):
                 summary.skipped += 1
                 continue
             if (
@@ -413,6 +467,8 @@ def enrich(
                 )
                 if outcome == "named":
                     summary.auto_named += 1
+                    if info.get("osm_type") and info.get("osm_id") is not None:
+                        summary.osm_from_nominatim += 1
                 elif outcome == "address":
                     summary.addresses += 1
                 else:

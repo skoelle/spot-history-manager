@@ -56,6 +56,10 @@ class FakeNominatim:
             "name": "Nominatim Café",
             "category": "amenity",
             "type": "cafe",
+            "osm_type": "node",
+            "osm_id": 4242,
+            "lat": "48.1001",
+            "lon": "11.5001",
             "address": {
                 "road": "Teststraße",
                 "house_number": "1",
@@ -156,9 +160,67 @@ class GoogleOsmEnrichTest(unittest.TestCase):
                 self.config, provider="nominatim", sleep=0, log=lambda _: None
             )
         self.assertEqual(summary.auto_named, 1)
+        self.assertEqual(summary.osm_from_nominatim, 1)
         row = self._cluster()
         self.assertEqual(row["name"], "Nominatim Café")
         self.assertEqual(row["name_source"], "nominatim")
+        self.assertEqual(row["osm_type"], "node")
+        self.assertEqual(row["osm_id"], 4242)
+
+    def test_nominatim_far_result_keeps_name_without_osm(self):
+        class FarNominatim(FakeNominatim):
+            def reverse_raw(self, lat, lng, zoom=18):
+                payload = super().reverse_raw(lat, lng, zoom)
+                payload["lat"] = "48.1020"
+                payload["lon"] = "11.5001"
+                return payload
+
+        with mock.patch.object(osm_enrich, "NominatimClient", FarNominatim):
+            summary = osm_enrich.enrich(
+                self.config, provider="nominatim", sleep=0, log=lambda _: None
+            )
+        self.assertEqual(summary.auto_named, 1)
+        self.assertEqual(summary.osm_from_nominatim, 0)
+        row = self._cluster()
+        self.assertEqual(row["name"], "Nominatim Café")
+        self.assertIsNone(row["osm_id"])
+
+    def test_nominatim_address_result_has_no_osm(self):
+        class AddressNominatim(FakeNominatim):
+            def reverse_raw(self, lat, lng, zoom=18):
+                return {
+                    "name": "",
+                    "category": "place",
+                    "type": "house",
+                    "osm_type": "way",
+                    "osm_id": 777,
+                    "lat": "48.1001",
+                    "lon": "11.5001",
+                    "address": {
+                        "road": "Teststraße",
+                        "house_number": "1",
+                        "city": "München",
+                        "country_code": "de",
+                    },
+                    "display_name": "1, Teststraße, München",
+                }
+
+        with mock.patch.object(osm_enrich, "NominatimClient", AddressNominatim):
+            summary = osm_enrich.enrich(
+                self.config, provider="nominatim", sleep=0, log=lambda _: None
+            )
+        self.assertEqual(summary.addresses, 1)
+        self.assertEqual(summary.osm_from_nominatim, 0)
+        row = self._cluster()
+        self.assertEqual(row["name"], "Teststraße 1")
+        self.assertEqual(row["name_source"], "address")
+        self.assertIsNone(row["osm_id"])
+
+        with mock.patch.object(osm_enrich, "NominatimClient", AddressNominatim):
+            second = osm_enrich.enrich(
+                self.config, provider="nominatim", sleep=0, log=lambda _: None
+            )
+        self.assertEqual(second.pending, 0)
 
     def test_candidates_visible_for_named_unmatched_cluster(self):
         db = Database(self.config.db_path).open()

@@ -52,6 +52,7 @@ TYPE_WEIGHTS = {
 AUTO_DISTANCE_M = 25.0
 CANDIDATE_DISTANCE_M = 50.0
 AUTO_MARGIN_M = 8.0
+NOMINATIM_OSM_MAX_DISTANCE_M = 50.0
 
 
 @dataclass
@@ -199,4 +200,6 @@ def nominatim_candidate(payload: dict) -> dict:
         "display_name": payload.get("display_name"),
         "lat": payload.get("lat"),
         "lng": payload.get("lon"),
+        "osm_type": payload.get("osm_type"),
+        "osm_id": payload.get("osm_id"),
     }

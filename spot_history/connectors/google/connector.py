@@ -225,6 +225,7 @@ class GoogleConnector(BaseConnector):
               f"{summary.overpass_pois} POIs")
         print(f"Nominatim:        {summary.nominatim_queries} Abfragen")
         print(f"Automatisch:      {summary.auto_named}")
+        print(f"OSM-ID:           {summary.osm_from_nominatim}")
         print(f"Adressen:         {summary.addresses}")
         print(f"Kandidaten:       {summary.candidates}")
         print(f"Ohne Treffer:     {summary.unmatched}")
