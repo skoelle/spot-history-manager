@@ -3,10 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from spot_history.core.places import (
     PlaceRule,
     SourcePlace,
+    collect_source_places,
     delete_rule,
     haversine_m,
     load_rules,
@@ -162,6 +164,48 @@ class PlacesMatchTest(unittest.TestCase):
         places[1].name = "Test Café"
         canonical, _ = resolve_canonical_places(places, rules)
         self.assertEqual(len(canonical), 2)
+
+    def test_collect_source_places_uses_connector_osm_extra(self):
+        visit = SimpleNamespace(
+            source="google",
+            source_place_id="g-school",
+            name="Inklusive Monte Balan",
+            lat=48.116781,
+            lng=11.604361,
+            extra={"osm_type": "node", "osm_id": 1255559552},
+        )
+        places = collect_source_places([visit])
+        place = places[("google", "g-school")]
+        self.assertEqual(place.osm_ref, ("node", 1255559552))
+
+    def test_manual_merge_same_source(self):
+        home = place("google", "g-zzz-home", "Zuhause", 48.12997, 11.63002)
+        home.visit_count = 1679
+        other = place(
+            "google", "g-aaa-eiscafe", "Eiscafe", 48.129894, 11.631173
+        )
+        other.visit_count = 228
+        rules = [
+            PlaceRule(
+                source="google",
+                source_place_id="g-aaa-eiscafe",
+                action="merge",
+                target_source="google",
+                target_source_place_id="g-zzz-home",
+            )
+        ]
+        canonical, candidates = resolve_canonical_places(
+            [home, other], rules
+        )
+        self.assertEqual(candidates, [])
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(canonical[0].canonical_key, "local-google-g-zzz-home")
+        self.assertEqual(canonical[0].name, "Zuhause")
+        self.assertEqual(canonical[0].coords, (48.12997, 11.63002))
+        self.assertEqual(
+            canonical[0].methods[("google", "g-aaa-eiscafe")], "manual"
+        )
+        self.assertEqual(len(canonical[0].members), 2)
 
     def test_local_key_is_derived_from_primary(self):
         places = [

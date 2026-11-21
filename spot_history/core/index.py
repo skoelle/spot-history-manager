@@ -6,7 +6,12 @@ from pathlib import Path
 
 from ..connectors.base import BaseConnector
 from .config import Paths
-from .identity import load_aliases, load_osm_assignments, record_aliases
+from .identity import (
+    load_aliases,
+    load_osm_assignments,
+    local_key,
+    record_aliases,
+)
 from .osm_coords import load_osm_coords
 from .places import (
     collect_source_places,
@@ -506,9 +511,13 @@ def build_index(
                     canonical.match_status,
                 ),
             )
-            for alias in (canonical.local_fallback_key, canonical.legacy_key):
-                if alias and alias != canonical.canonical_key:
-                    alias_map.setdefault(alias, canonical.canonical_key)
+            for member in canonical.members:
+                for alias in (
+                    local_key(member.source, member.source_place_id),
+                    member.ref,
+                ):
+                    if alias and alias != canonical.canonical_key:
+                        alias_map.setdefault(alias, canonical.canonical_key)
             canonical_id = int(cursor.lastrowid)
             canonical_by_id[canonical_id] = canonical
             for member in canonical.members:

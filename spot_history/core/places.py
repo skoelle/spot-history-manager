@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .categories import resolve_category_group
-from .identity import OsmAssignment, osm_key
+from .identity import OsmAssignment, osm_key, validate_osm
 from .identity import local_key as build_local_key
 
 SOURCE_PRIORITY = ("foursquare", "yelp")
@@ -180,10 +180,15 @@ class CanonicalPlace:
 
     @property
     def sorted_members(self) -> list[SourcePlace]:
-        return sorted(
-            self.members,
+        others = sorted(
+            (
+                place
+                for place in self.members
+                if place.key != self.primary.key
+            ),
             key=lambda place: (source_rank(place.source), place.source, place.source_place_id),
         )
+        return [self.primary, *others]
 
     def best(self, attribute: str) -> Any:
         for member in self.sorted_members:
@@ -310,6 +315,16 @@ def collect_source_places(visits: Iterable[Any]) -> dict[tuple[str, str], Source
         extra = getattr(visit, "extra", None) or {}
         if extra.get("comment_only"):
             place.comment_only = True
+        osm_type = extra.get("osm_type")
+        osm_id = extra.get("osm_id")
+        if osm_type and osm_id is not None:
+            try:
+                clean_type, clean_id = validate_osm(osm_type, osm_id)
+            except ValueError:
+                pass
+            else:
+                place.osm_type = clean_type
+                place.osm_id = clean_id
         place.visit_count += 1
     return places
 

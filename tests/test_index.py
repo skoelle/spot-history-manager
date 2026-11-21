@@ -120,6 +120,23 @@ class OtherConnector(BaseConnector):
         )
 
 
+class GoogleExtraConnector(BaseConnector):
+    name = "google"
+    kind = "import"
+
+    def iter_visits(self):
+        yield Visit(
+            source="google",
+            source_visit_id="gv1",
+            visited_at=1700000300,
+            lat=48.116781,
+            lng=11.604361,
+            place_name="Inklusive Monte Balan",
+            source_place_id="g-c3284762f109",
+            extra={"osm_type": "node", "osm_id": 1255559552},
+        )
+
+
 class EmptyConnector(BaseConnector):
     name = "empty"
     kind = "sync"
@@ -309,6 +326,40 @@ class IndexTest(unittest.TestCase):
             self.assertEqual(feature["properties"]["coords_source"], "osm")
             self.assertEqual(feature["properties"]["lat"], 48.1)
             self.assertEqual(feature["properties"]["osm_lat"], 48.2)
+
+    def test_connector_osm_extra_sets_canonical_and_aliases_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            summary = build_index(
+                {"google": GoogleExtraConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            self.assertEqual(summary["matched_osm"], 1)
+            conn = sqlite3.connect(paths.index_db)
+            conn.row_factory = sqlite3.Row
+            try:
+                venue = conn.execute(
+                    "SELECT * FROM canonical_places"
+                ).fetchone()
+                aliases = {
+                    item["alias_key"]: item["canonical_key"]
+                    for item in conn.execute(
+                        "SELECT alias_key, canonical_key FROM canonical_aliases"
+                    )
+                }
+            finally:
+                conn.close()
+            self.assertEqual(venue["canonical_key"], "osm-node-1255559552")
+            self.assertEqual(venue["match_status"], "osm")
+            self.assertEqual(
+                aliases["local-google-g-c3284762f109"],
+                "osm-node-1255559552",
+            )
+            self.assertEqual(
+                aliases["google:g-c3284762f109"],
+                "osm-node-1255559552",
+            )
 
     def test_rebuild_discards_stale_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
