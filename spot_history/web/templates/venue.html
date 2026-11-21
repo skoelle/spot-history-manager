@@ -104,6 +104,10 @@
     {% endif %}
     </div>
 
+    {% set has_sidebar = venue.match_status == 'osm' or merge_candidates or (members|length > 1) %}
+    <div class="venue-layout{% if not has_sidebar %} venue-layout-single{% endif %}">
+    <main class="venue-main">
+
     {% set list_memberships = venue.records.get('list_membership', []) %}
     {% set liked_memberships = list_memberships|selectattr('payload.list_type', 'equalto', 'liked')|list %}
     {% if list_memberships %}
@@ -317,75 +321,6 @@
         </div>
         {% endif %}
     </div>
-    {% else %}
-    <div class="box osm-panel">
-        <div class="box-title">OSM-Zuordnung</div>
-        <div class="venue-facts">
-            <span>{{ venue.osm_type }}/{{ venue.osm_id }}</span>
-            <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">Auf OpenStreetMap öffnen</a>
-        </div>
-        <form method="post" action="/venues/{{ venue.key }}/osm/clear"
-              onsubmit="return confirm('OSM-Zuordnung wirklich entfernen?');">
-            <button type="submit" class="button danger">Zuordnung entfernen</button>
-        </form>
-    </div>
-    {% endif %}
-
-    {% if merge_candidates or members|length > 1 %}
-    <div class="box merge-panel">
-        <div class="box-title">Ort zusammenführen</div>
-        {% if members|length > 1 %}
-        <div class="merge-members">
-            <div class="merge-candidates-title">Aktuell zusammengeführt</div>
-            {% if venue.osm_url %}
-            <div class="merge-candidate">
-                <span class="merge-candidate-name">
-                    <span class="badge source-osm">osm</span>
-                    {{ osm_name or (venue.osm_type ~ '/' ~ venue.osm_id) }}
-                    {% if osm_name %}
-                    <a class="original-link" href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
-            {% for member in members %}
-            <div class="merge-candidate">
-                <span class="merge-candidate-name">
-                    <span class="badge source-{{ member.source }}">{{ member.source }}</span>
-                    {{ member.name or member.source_place_id }}
-                </span>
-                <form method="post" action="/venues/{{ venue.key }}/unmerge"
-                      onsubmit="return confirm('Diesen Quell-Ort wieder trennen?');">
-                    <input type="hidden" name="place" value="{{ member.source }}:{{ member.source_place_id }}">
-                    <button type="submit" class="button danger">Trennen</button>
-                </form>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% if merge_candidates %}
-        <div class="merge-candidates">
-            <div class="merge-candidates-title">Nahe Orte</div>
-            {% for candidate in merge_candidates %}
-            <form class="merge-candidate" method="post" action="/venues/{{ venue.key }}/merge">
-                <input type="hidden" name="target" value="{{ candidate.key }}">
-                <span class="merge-candidate-name">
-                    <strong>{{ candidate.name or 'Unbenannt' }}</strong>
-                    {% for source in candidate.sources %}
-                    <span class="badge source-{{ source }}">{{ source }}</span>
-                    {% endfor %}
-                </span>
-                <span class="muted">
-                    {{ "%.0f"|format(candidate.distance_m) }} m ·
-                    Ähnlichkeit {{ "%.2f"|format(candidate.similarity) }}
-                    {% if candidate.match_status == 'osm' %} · OSM{% endif %}
-                </span>
-                <button type="submit">Zusammenführen</button>
-            </form>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </div>
     {% endif %}
 
     {% if photos %}
@@ -444,6 +379,83 @@
         {% if prev_url %}<a class="button" href="{{ prev_url }}">Zurück</a>{% endif %}
         <span class="muted">Seite {{ page }} von {{ pages }}</span>
         {% if next_url %}<a class="button" href="{{ next_url }}">Weiter</a>{% endif %}
+    </div>
+    </main>
+
+    {% if has_sidebar %}
+    <aside class="venue-sidebar">
+        {% if venue.match_status == 'osm' %}
+        <div class="box osm-panel">
+            <div class="box-title">OSM-Zuordnung</div>
+            <div class="venue-facts">
+                <span>{{ venue.osm_type }}/{{ venue.osm_id }}</span>
+                <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">Auf OpenStreetMap öffnen</a>
+            </div>
+            <form method="post" action="/venues/{{ venue.key }}/osm/clear"
+                  onsubmit="return confirm('OSM-Zuordnung wirklich entfernen?');">
+                <button type="submit" class="button danger">Zuordnung entfernen</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if merge_candidates or members|length > 1 %}
+        <div class="box merge-panel">
+            <div class="box-title">Ort zusammenführen</div>
+            {% if members|length > 1 %}
+            <div class="merge-members">
+                <div class="merge-candidates-title">Aktuell zusammengeführt</div>
+                {% if venue.osm_url %}
+                <div class="merge-candidate">
+                    <span class="merge-candidate-name">
+                        <span class="badge source-osm">osm</span>
+                        {{ osm_name or (venue.osm_type ~ '/' ~ venue.osm_id) }}
+                        {% if osm_name %}
+                        <a class="original-link" href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a>
+                        {% endif %}
+                    </span>
+                </div>
+                {% endif %}
+                {% for member in members %}
+                <div class="merge-candidate">
+                    <span class="merge-candidate-name">
+                        <span class="badge source-{{ member.source }}">{{ member.source }}</span>
+                        {{ member.name or member.source_place_id }}
+                    </span>
+                    <form method="post" action="/venues/{{ venue.key }}/unmerge"
+                          onsubmit="return confirm('Diesen Quell-Ort wieder trennen?');">
+                        <input type="hidden" name="place" value="{{ member.source }}:{{ member.source_place_id }}">
+                        <button type="submit" class="button danger">Trennen</button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if merge_candidates %}
+            <div class="merge-candidates">
+                <div class="merge-candidates-title">Nahe Orte</div>
+                {% for candidate in merge_candidates %}
+                <form class="merge-candidate" method="post" action="/venues/{{ venue.key }}/merge">
+                    <input type="hidden" name="target" value="{{ candidate.key }}">
+                    <span class="merge-candidate-name">
+                        <strong>{{ candidate.name or 'Unbenannt' }}</strong>
+                        {% for source in candidate.sources %}
+                        <span class="badge source-{{ source }}">{{ source }}</span>
+                        {% endfor %}
+                    </span>
+                    <span class="muted">
+                        {{ "%.0f"|format(candidate.distance_m) }} m ·
+                        Ähnlichkeit {{ "%.2f"|format(candidate.similarity) }}
+                        {% if candidate.match_status == 'osm' %} · OSM{% endif %}
+                    </span>
+                    <button type="submit">Zusammenführen</button>
+                </form>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </aside>
+    {% endif %}
     </div>
 </div>
 {% include "_lightbox.html" %}
