@@ -9,8 +9,8 @@ import urllib.request
 from .db import Poi
 
 DEFAULT_OVERPASS_ENDPOINTS = (
+    "https://overpass.openstreetmap.fr/api/interpreter",
     "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
 )
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -77,7 +77,7 @@ class OverpassClient:
     def __init__(
         self,
         endpoints: tuple[str, ...] = DEFAULT_OVERPASS_ENDPOINTS,
-        timeout: float = 60.0,
+        timeout: float = 90.0,
         sleep: float = 2.0,
         verbose: bool = False,
     ) -> None:
@@ -124,6 +124,11 @@ class OverpassClient:
                 time.sleep(min(2 ** attempt, 20))
                 continue
             pois = parse_overpass_elements(payload)
+            if endpoint != self.endpoints[0]:
+                self.endpoints = (endpoint,) + tuple(
+                    item for item in self.endpoints if item != endpoint
+                )
+            self._endpoint_index = 0
             self._log(
                 f"Overpass {len(points)} Punkte -> {len(pois)} POIs "
                 f"({time.time() - started:.1f}s, {endpoint})"
