@@ -139,8 +139,9 @@ abgeleitete Kartenpunkte, jeweils mit Badge „Kommentar“. Kommentare zu einem
 vorhandenen Check-in erscheinen als Kommentarzeilen am jeweiligen Visit.
 Die Seite `/foursquare` zeigt das Foursquare-Profil und bündelt Tips, Listen
 (inklusive Listeneinträgen), Tastes sowie Kommentare und Likes der Check-ins.
-Tips erscheinen zusätzlich oben auf der jeweiligen Venue-Detailseite;
-Check-in-Kommentare und Likes werden am Visit angezeigt.
+Tips und Listenzugehörigkeiten (inklusive „Geliked“/„Gespeichert“) erscheinen
+zusätzlich oben auf der jeweiligen Venue-Detailseite; Check-in-Kommentare und
+Likes werden am Visit angezeigt.
 Die Seite `/yelp` (früher `/aktivitaet`; alte Links werden umgeleitet) zeigt
 oben die Kontodaten und das Yelp-Profilfoto als flachen Profilblock
 (Profilfoto nicht mehr unter „Fotos ohne Check-in“) und bündelt darunter
@@ -260,8 +261,8 @@ bereits zusammengeführte Quell-Orte lassen sich dort wieder trennen. Beides
 schreibt Regeln in `data/places/place_rules.db` und baut den Index neu.
 
 `merge`, `unmerge` und `reset` bauen den Index standardmäßig sofort neu
-(`--no-build` überspringt das). Aktueller Datenstand: 2462 Quell-Orte, 2189
-kanonische Orte, 254 gemergte Orte (davon 2 manuell) und 37 offene
+(`--no-build` überspringt das). Aktueller Datenstand: 2462 Quell-Orte, 2190
+kanonische Orte, 254 gemergte Orte (davon 2 manuell) und 38 offene
 Merge-Vorschläge.
 
 Bekannte Grenzen:
@@ -466,6 +467,12 @@ python3 -m spot_history google stats
   25 und 50 m sowie Mehrdeutiges landen als Kandidaten in
   `google osm-candidates`; dort lassen sie sich mit `google osm-accept`
   übernehmen.
+- Nominatim-Reverse-Treffer mit gültigem Namen und höchstens 50 m Abstand
+  übernehmen zusätzlich `osm_type` und `osm_id`. Diese Cluster werden dadurch
+  im Index als OSM-Orte geführt und mit gleichnamigen Quellen zusammengeführt.
+  Treffer über 50 m liefern weiterhin nur den Namen; Adress-Treffer erhalten
+  keine OSM-ID. Bereits verarbeitete Adress-Cluster werden ohne `--force` nicht
+  erneut abgefragt.
 - Bewertungen und gespeicherte Orte werden als `source_records` importiert,
   auf Venue-Detailseiten angezeigt und innerhalb von 15 m als Namenshilfe
   verwendet (eine Google-Bewertung kann einen ungenauen OSM-Namen ersetzen).

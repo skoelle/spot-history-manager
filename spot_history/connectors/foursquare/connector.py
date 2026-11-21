@@ -498,6 +498,23 @@ class FoursquareConnector(BaseConnector):
                         "items": items,
                     },
                 }
+                for item in items:
+                    yield {
+                        "source": SOURCE,
+                        "record_id": (
+                            f"list_membership:{row['id']}:{item['venue_id']}"
+                        ),
+                        "kind": "list_membership",
+                        "source_place_id": item["venue_id"],
+                        "created_at": None,
+                        "payload": {
+                            "list_id": row["id"],
+                            "list_name": row["name"],
+                            "list_type": row["type"],
+                            "list_visibility": row["visibility"],
+                            "note": item["note"],
+                        },
+                    }
 
             for row in conn.execute("SELECT * FROM tastes ORDER BY text"):
                 yield {

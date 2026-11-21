@@ -803,6 +803,7 @@ def _details_for_links(conn: sqlite3.Connection, links: list[dict]) -> dict:
 
 VENUE_RECORD_KINDS = (
     "tip",
+    "list_membership",
     "survey_answer",
     "business_interaction",
     "unlinked_photo",

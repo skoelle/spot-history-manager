@@ -101,6 +101,36 @@
     {% endif %}
     </div>
 
+    {% set list_memberships = venue.records.get('list_membership', []) %}
+    {% set liked_memberships = list_memberships|selectattr('payload.list_type', 'equalto', 'liked')|list %}
+    {% if list_memberships %}
+    <div class="box foursquare-lists">
+        <div class="box-title">
+            Foursquare-Listen · {{ list_memberships|length }}
+            {% if liked_memberships %}<span class="badge">Geliked</span>{% endif %}
+        </div>
+        <ul class="record-list">
+            {% for item in list_memberships %}
+            <li class="record-item">
+                <div class="record-main">
+                    {{ item.payload.list_name or 'Unbenannte Liste' }}
+                    {% if item.payload.list_type == 'liked' %}
+                    <span class="badge">Geliked</span>
+                    {% elif item.payload.list_type == 'todos' %}
+                    <span class="badge">Gespeichert</span>
+                    {% elif item.payload.list_type == 'created' %}
+                    <span class="badge">Eigene Liste</span>
+                    {% elif item.payload.list_type == 'followed' %}
+                    <span class="badge">Gefolgt</span>
+                    {% endif %}
+                </div>
+                {% if item.payload.note %}<div class="record-text">{{ item.payload.note }}</div>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     {% set venue_tips = venue.records.get('tip', []) %}
     {% if venue_tips %}
     <div class="box foursquare-tips">

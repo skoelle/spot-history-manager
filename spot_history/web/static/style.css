@@ -974,6 +974,11 @@ button:hover,
     font-size: 0.85rem;
 }
 
+.foursquare-lists,
+.foursquare-tips {
+    margin-bottom: 1.5rem;
+}
+
 .yelp-details {
     margin-bottom: 1.5rem;
 }

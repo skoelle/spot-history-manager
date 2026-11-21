@@ -345,6 +345,20 @@ class FoursquareActivityConnector(BaseConnector):
         }
         yield {
             "source": "foursquare",
+            "record_id": "list_membership:l1:v1",
+            "kind": "list_membership",
+            "source_place_id": "v1",
+            "created_at": None,
+            "payload": {
+                "list_id": "l1",
+                "list_name": "München",
+                "list_type": "liked",
+                "list_visibility": "public",
+                "note": None,
+            },
+        }
+        yield {
+            "source": "foursquare",
             "record_id": "comments:c1",
             "kind": "foursquare_comment",
             "source_place_id": "v1",
@@ -767,6 +781,9 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(visits[0]["likes"], ["Alex", "Sam"])
         self.assertIsNotNone(venue)
         self.assertEqual(venue["records"]["tip"][0]["payload"]["venue_name"], "Michaeligarten")
+        membership = venue["records"]["list_membership"][0]
+        self.assertEqual(membership["payload"]["list_name"], "München")
+        self.assertEqual(membership["payload"]["list_type"], "liked")
 
     def test_activity_groups_records(self):
         groups = web_data.load_activity(self.conn, source="fake")
