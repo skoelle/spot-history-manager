@@ -82,6 +82,7 @@ class GoogleImportTest(unittest.TestCase):
         self.assertEqual(len(home), 2)
         self.assertEqual(home[0].source, "google")
         self.assertIn("query_place_id=", home[0].place_url or "")
+        self.assertIsNotNone(home[0].extra["end_time"])
 
     def test_manual_override_survives_reimport(self):
         self._import()

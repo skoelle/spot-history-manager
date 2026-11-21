@@ -311,7 +311,8 @@
                 {% if visit.photo_count %}
                 <span class="badge">{{ visit.photo_count }} Foto{% if visit.photo_count != 1 %}s{% endif %}</span>
                 {% endif %}
-                <span class="visit-time">{{ visit.time }}</span>
+                <span class="visit-time">{{ visit.time }}{% if visit.end_time %}–{{ visit.end_time }}{% endif %}</span>
+                {% if visit.duration %}<span class="badge visit-duration" title="Aufenthaltsdauer">{{ visit.duration }}</span>{% endif %}
                 {% if visit.source_url %}
                 <a class="original-link" href="{{ visit.source_url }}" target="_blank" rel="noopener">Original</a>
                 {% endif %}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime, timezone
 
 from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.connectors.osm import db as osm_db
@@ -145,6 +146,7 @@ class FakeConnector(BaseConnector):
             country_code="DE",
             note="Biergarten",
             place_url="https://example.invalid/fake/michi",
+            extra={"end_time": "2023-11-14T22:58:20+00:00"},
             photos=[
                 Photo(source_photo_id="ph1", local_path="data/fake/photos/ph1.jpg"),
                 Photo(source_photo_id="vid1", local_path="data/fake/media/video/vid1.mp4"),
@@ -313,6 +315,51 @@ class WebDataTest(unittest.TestCase):
             ),
             1,
         )
+
+    def test_visit_duration_and_end_time(self):
+        visits = web_data.query_visits(
+            self.conn, web_data.Filters(), limit=10, offset=0
+        )
+        visit = next(item for item in visits if item["source_visit_id"] == "m1")
+        self.assertEqual(visit["duration"], "45 Min")
+        self.assertEqual(visit["duration_minutes"], 45)
+        self.assertEqual(visit["end_time"], "23:58")
+        other = next(item for item in visits if item["source_visit_id"] == "m2")
+        self.assertIsNone(other["duration"])
+        self.assertIsNone(other["duration_minutes"])
+        self.assertIsNone(other["end_time"])
+
+    def test_format_end_label(self):
+        self.assertEqual(
+            web_data._format_end_label(
+                datetime(2024, 1, 1, 22, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 1, 23, 30, tzinfo=timezone.utc),
+            ),
+            "23:30",
+        )
+        self.assertEqual(
+            web_data._format_end_label(
+                datetime(2024, 1, 1, 22, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 2, 3, 0, tzinfo=timezone.utc),
+            ),
+            "02.01. 03:00",
+        )
+        self.assertIsNone(
+            web_data._format_end_label(
+                datetime(2024, 1, 1, tzinfo=timezone.utc), None
+            )
+        )
+
+    def test_format_duration(self):
+        self.assertEqual(web_data._format_duration(45 * 60), "45 Min")
+        self.assertEqual(web_data._format_duration(60 * 60), "1 Std")
+        self.assertEqual(
+            web_data._format_duration((2 * 60 + 11) * 60), "2 Std 11 Min"
+        )
+        self.assertEqual(web_data._format_duration(26 * 60 * 60), "1 Tag 2 Std")
+        self.assertIsNone(web_data._format_duration(0))
+        self.assertIsNone(web_data._format_duration(-5))
+        self.assertIsNone(web_data._format_duration(None))
 
     def test_profiles_and_venues(self):
         profiles = web_data.load_profiles(self.conn)

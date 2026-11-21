@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..core.categories import GROUP_RANK
@@ -148,12 +148,72 @@ def _format_moment(local_datetime: str | None, visited_at: int) -> datetime:
     return datetime.fromtimestamp(int(visited_at), timezone.utc)
 
 
+def _parse_end_time(value) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        stamp = float(value)
+        if stamp > 1e11:
+            stamp /= 1000.0
+        return int(stamp)
+    try:
+        parsed = datetime.fromisoformat(
+            str(value).strip().replace("Z", "+00:00")
+        )
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+def _duration_seconds(extra: dict, visited_at: int) -> int | None:
+    end_stamp = _parse_end_time(extra.get("end_time"))
+    if end_stamp is None:
+        return None
+    seconds = end_stamp - int(visited_at)
+    return seconds if seconds > 0 else None
+
+
+def _format_duration(seconds: int | None) -> str | None:
+    if not seconds or seconds <= 0:
+        return None
+    minutes = int(seconds) // 60
+    if minutes < 1:
+        return "< 1 Min"
+    days, rest = divmod(minutes, 60 * 24)
+    hours, mins = divmod(rest, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days} Tag" if days == 1 else f"{days} Tage")
+    if hours:
+        parts.append(f"{hours} Std")
+    if mins and not days:
+        parts.append(f"{mins} Min")
+    return " ".join(parts) or "< 1 Min"
+
+
+def _format_end_label(moment: datetime, end_moment: datetime | None) -> str | None:
+    if end_moment is None:
+        return None
+    if end_moment.date() == moment.date():
+        return end_moment.strftime("%H:%M")
+    return end_moment.strftime("%d.%m. %H:%M")
+
+
 def _format_row(row: sqlite3.Row) -> dict:
     moment = _format_moment(row["local_datetime"], row["visited_at"])
     extra = _parse_json(row["extra_json"]) or {}
     comments = extra.get("comments")
     if not isinstance(comments, list):
         comments = []
+    duration_seconds = _duration_seconds(extra, row["visited_at"])
+    end_moment = (
+        moment + timedelta(seconds=duration_seconds)
+        if duration_seconds is not None
+        else None
+    )
+    end_label = _format_end_label(moment, end_moment)
     return {
         "id": row["id"],
         "source": row["source"],
@@ -161,6 +221,11 @@ def _format_row(row: sqlite3.Row) -> dict:
         "visited_at": row["visited_at"],
         "date": moment.strftime("%d.%m.%Y"),
         "time": moment.strftime("%H:%M"),
+        "end_time": end_label,
+        "duration": _format_duration(duration_seconds),
+        "duration_minutes": (
+            duration_seconds // 60 if duration_seconds is not None else None
+        ),
         "day": moment.strftime("%d"),
         "month": MONTHS[moment.month - 1],
         "year": moment.strftime("%Y"),

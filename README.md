@@ -101,7 +101,9 @@ Die Seite zeigt standardmäßig alle Besuche in München, mit Filtern für Stadt
 Jahr, Hauptkategorie, Unterkategorie, Quelle und Freitext. Oben eine
 Leaflet-Karte mit OpenStreetMap-Tiles (Leaflet liegt lokal unter
 `spot_history/web/static/vendor/leaflet/`), darunter die Liste mit 60 Treffern
-pro Seite. Klick auf Karte und Liste ist synchronisiert.
+pro Seite. Klick auf Karte und Liste ist synchronisiert. Besuchskarten zeigen
+Start- und Endzeit sowie die Aufenthaltsdauer, sofern die Quelle eine Endzeit
+liefert (aktuell Google Timeline).
 
 Die Fein-Kategorien (z. B. `German Restaurant`, `Café`, `Beer Garden`) werden
 beim Index-Build in Hauptkategorien zusammengefasst (`Restaurants`, `Cafés`,

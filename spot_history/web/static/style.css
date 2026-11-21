@@ -367,6 +367,11 @@ button:hover,
     color: #8a6200;
 }
 
+.visit-duration {
+    background: #eaf5ea;
+    color: #2e6b34;
+}
+
 .source-google {
     background: #e8f0fe;
     color: #1a73e8;
