@@ -78,6 +78,62 @@
         {% endif %}
     </div>
 
+    {% if assign_error %}
+    <div class="notice notice-error">{{ assign_error }}</div>
+    {% endif %}
+    {% if assign_ok %}
+    <div class="notice">Gespeichert: {{ assign_ok }}</div>
+    {% endif %}
+
+    {% if venue.match_status != 'osm' %}
+    <div class="box osm-panel">
+        <div class="box-title">OSM-Objekt zuordnen</div>
+        <p class="muted">
+            Dieser Ort hat noch keine OSM-ID. Eine Zuordnung macht die OSM-ID zum
+            Hauptschlüssel und führt alle Quell-Orte dieses Orts zusammen.
+        </p>
+        <form class="osm-form" method="post" action="/venues/{{ venue.key }}/osm">
+            <label class="field field-search">
+                <span>OSM-ID oder URL</span>
+                <input type="text" name="osm" required
+                       placeholder="node/123, way-247857140 oder openstreetmap.org/...">
+            </label>
+            <button type="submit">Speichern</button>
+        </form>
+        {% if osm_candidates %}
+        <div class="osm-candidates">
+            <div class="osm-candidates-title">Vorschläge</div>
+            {% for candidate in osm_candidates %}
+            <form class="osm-candidate" method="post" action="/venues/{{ venue.key }}/osm">
+                <input type="hidden" name="osm" value="{{ candidate.osm_type }}/{{ candidate.osm_id }}">
+                <span class="osm-candidate-name">
+                    <strong>{{ candidate.osm_name or 'Unbekannt' }}</strong>
+                    · {{ candidate.osm_type }}/{{ candidate.osm_id }}
+                </span>
+                <span class="muted">
+                    {% if candidate.score is not none %}Score {{ "%.2f"|format(candidate.score) }}{% endif %}
+                    {% if candidate.distance_m is not none %} · {{ "%.0f"|format(candidate.distance_m) }} m{% endif %}
+                </span>
+                <button type="submit">Übernehmen</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="box osm-panel">
+        <div class="box-title">OSM-Zuordnung</div>
+        <div class="venue-facts">
+            <span>{{ venue.osm_type }}/{{ venue.osm_id }}</span>
+            <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">Auf OpenStreetMap öffnen</a>
+        </div>
+        <form method="post" action="/venues/{{ venue.key }}/osm/clear"
+              onsubmit="return confirm('OSM-Zuordnung wirklich entfernen?');">
+            <button type="submit" class="button danger">Zuordnung entfernen</button>
+        </form>
+    </div>
+    {% endif %}
+
     {% if photos %}
     <div class="box photo-box">
         <div class="box-title">Fotos · {{ photos|length }}</div>

@@ -5,6 +5,7 @@ import unittest
 
 from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.core.config import build_paths
+from spot_history.core.identity import upsert_osm_assignment
 from spot_history.core.index import build_index
 from spot_history.core.media import thumb_relpath
 from spot_history.web import data as web_data
@@ -321,6 +322,58 @@ class WebDataTest(unittest.TestCase):
                 conn.close()
         self.assertEqual(len(detail["links"]), 2)
         self.assertEqual({visit["source"] for visit in visits}, {"fake", "other"})
+
+    def test_venue_match_filters_members_and_counts(self):
+        counts = web_data.load_venue_match_counts(self.conn)
+        self.assertEqual(counts["all"], 3)
+        self.assertEqual(counts["local"], 3)
+        self.assertEqual(counts["osm"], 0)
+        self.assertEqual(
+            web_data.count_venues(
+                self.conn, web_data.VenueFilters(match="local")
+            ),
+            3,
+        )
+        self.assertEqual(
+            web_data.count_venues(
+                self.conn, web_data.VenueFilters(match="unmatched")
+            ),
+            3,
+        )
+        self.assertEqual(
+            web_data.count_venues(self.conn, web_data.VenueFilters(match="osm")),
+            0,
+        )
+        venues = web_data.query_venues(
+            self.conn, web_data.VenueFilters(q="Michaeligarten"), limit=10, offset=0
+        )
+        members = web_data.venue_members(self.conn, venues[0]["id"])
+        self.assertEqual(
+            [(member["source"], member["source_place_id"]) for member in members],
+            [("fake", "p1")],
+        )
+
+    def test_osm_filter_after_manual_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            upsert_osm_assignment(
+                paths.place_identity_db, "fake", "p1", "node", 42
+            )
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                counts = web_data.load_venue_match_counts(conn)
+                self.assertEqual(counts["osm"], 1)
+                venues = web_data.query_venues(
+                    conn, web_data.VenueFilters(match="osm"), limit=10, offset=0
+                )
+            finally:
+                conn.close()
+        self.assertEqual(len(venues), 1)
+        self.assertEqual(venues[0]["key"], "osm-node-42")
+        self.assertEqual(venues[0]["match_status"], "osm")
+        self.assertEqual(venues[0]["osm_url"], "https://www.openstreetmap.org/node/42")
 
     def test_venue_lookup_by_key_and_legacy(self):
         venues = web_data.query_venues(

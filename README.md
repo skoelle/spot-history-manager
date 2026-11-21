@@ -116,6 +116,16 @@ als eigener Video-Eintrag dargestellt.
 Der Karten-Popup zeigt Quelle, Kategorie, Adresse/Stadt und einen direkten Link
 zum Ort (`/venues/{key}`), nicht mehr den Foursquare-Original-Link.
 
+Die Ortsliste hat einen Filter **OSM-Status** (mit OSM-ID, nur lokal, ohne
+OSM-ID, Konflikte). Auf der Detailseite eines nicht gematchten Orts gibt es ein
+Panel **„OSM-Objekt zuordnen“** mit manueller Eingabe (`node/123`,
+`way-247857140` oder OSM-URL) und – falls vorhanden – den Kandidaten aus
+`osm sync` zum Übernehmen. Bei gematchten Orten lässt sich die Zuordnung dort
+wieder entfernen. Jede Änderung schreibt in `data/places/identity.db` und baut
+den Index sofort neu; danach leitet die Seite auf den neuen Key um. Die
+POST-Endpunkte prüfen die Herkunft (Same-Origin), die Oberfläche bleibt aber
+wie der Rest ohne Login und ist für LAN/interne Nutzung gedacht.
+
 Lokale Bilder und Thumbnails werden über `/media/...` ausgeliefert. Erlaubt sind
 nur Bild- und Videodateien unter `data/*/profile/`, `data/*/photos/`,
 `data/*/media/` und `data/*/thumbs/`; Datenbanken, Exporte und Pfad-Traversal

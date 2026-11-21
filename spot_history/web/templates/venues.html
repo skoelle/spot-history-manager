@@ -53,6 +53,18 @@
                 {% endfor %}
             </select>
         </label>
+        <label class="field">
+            <span>OSM-Status</span>
+            <select name="match">
+                <option value="" {% if not query.match %}selected{% endif %}>Alle ({{ match_counts.all }})</option>
+                <option value="osm" {% if query.match == 'osm' %}selected{% endif %}>Mit OSM-ID ({{ match_counts.osm }})</option>
+                <option value="local" {% if query.match == 'local' %}selected{% endif %}>Nur lokal ({{ match_counts.local }})</option>
+                <option value="unmatched" {% if query.match == 'unmatched' %}selected{% endif %}>Ohne OSM-ID ({{ match_counts.local + match_counts.conflict }})</option>
+                {% if match_counts.conflict %}
+                <option value="conflict" {% if query.match == 'conflict' %}selected{% endif %}>Konflikte ({{ match_counts.conflict }})</option>
+                {% endif %}
+            </select>
+        </label>
         <label class="field field-search">
             <span>Suche</span>
             <input type="search" name="q" value="{{ query.q }}" placeholder="Ort, Kategorie, Adresse, Stadt ...">

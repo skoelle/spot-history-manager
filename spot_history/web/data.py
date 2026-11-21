@@ -34,6 +34,7 @@ class VenueFilters:
     category: str | None = None
     source: str | None = None
     q: str | None = None
+    match: str | None = None
 
 
 @dataclass(frozen=True)
@@ -402,6 +403,13 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
             "WHERE pl.canonical_id = p.id AND pl.source = ?)"
         )
         params.append(filters.source)
+    if filters.match == "osm":
+        clauses.append("p.match_status = 'osm'")
+    elif filters.match in ("local", "conflict"):
+        clauses.append("p.match_status = ?")
+        params.append(filters.match)
+    elif filters.match == "unmatched":
+        clauses.append("p.match_status != 'osm'")
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
@@ -440,6 +448,38 @@ def load_venue_options(conn: sqlite3.Connection) -> dict:
         "categories": _place_options(conn, "p.category", limit=80),
         "sources": sources,
     }
+
+
+def load_venue_match_counts(conn: sqlite3.Connection) -> dict:
+    counts = {"all": 0, "osm": 0, "local": 0, "conflict": 0}
+    try:
+        rows = conn.execute(
+            "SELECT match_status, COUNT(*) AS n FROM canonical_places "
+            "GROUP BY match_status"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return counts
+    for row in rows:
+        counts["all"] += int(row["n"])
+        counts[row["match_status"]] = int(row["n"])
+    return counts
+
+
+def venue_members(conn: sqlite3.Connection, place_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT source, source_place_id, name, url FROM place_links "
+        "WHERE canonical_id = ? ORDER BY source, source_place_id",
+        (place_id,),
+    ).fetchall()
+    return [
+        {
+            "source": row["source"],
+            "source_place_id": row["source_place_id"],
+            "name": row["name"],
+            "url": row["url"],
+        }
+        for row in rows
+    ]
 
 
 def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
