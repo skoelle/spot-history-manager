@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ...core import identity
 from ...core.config import Paths
+from ...core.places import looks_like_address
 from . import db as osm_db
 from .matcher import (
     IndexPlace,
@@ -38,6 +39,17 @@ class SyncSummary:
     candidates: int = 0
     errors: int = 0
     pois: int = 0
+    addresses: int = 0
+
+
+@dataclass
+class RematchSummary:
+    places: int = 0
+    pending: int = 0
+    auto_matched: int = 0
+    candidates: int = 0
+    none: int = 0
+    addresses: int = 0
 
 
 def _nominatim_query(place: IndexPlace) -> str:
@@ -83,6 +95,9 @@ def sync(
         if not place.members:
             continue
         if any(member in assignments for member in place.members):
+            continue
+        if looks_like_address(place.name):
+            summary.addresses += 1
             continue
         pending.append(place)
     if limit is not None:
@@ -249,4 +264,116 @@ def sync(
             )
         conn.close()
 
+    return summary
+
+
+def rematch(
+    paths: Paths,
+    *,
+    radius: int = DEFAULT_RADIUS,
+    limit: int | None = None,
+    dry_run: bool = False,
+    verbose: bool = False,
+    osm_db_path: Path | None = None,
+    log=print,
+) -> RematchSummary:
+    """Match open places against the existing POI cache without network access."""
+    summary = RematchSummary()
+    places = load_index_places(paths.index_db)
+    summary.places = len(places)
+    assignments = identity.load_osm_assignments(paths.place_identity_db)
+    pending = [
+        place
+        for place in places
+        if place.members
+        and not any(member in assignments for member in place.members)
+    ]
+    if limit is not None:
+        pending = pending[: max(0, limit)]
+    summary.pending = len(pending)
+    if not pending:
+        log("OSM: keine offenen Orte für den Offline-Rematch.")
+        return summary
+
+    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    if not db_path.exists():
+        raise FileNotFoundError(f"Kein OSM-Cache vorhanden: {db_path}")
+    conn = osm_db.open_db(db_path)
+    try:
+        for place in pending:
+            if looks_like_address(place.name):
+                summary.addresses += 1
+                if not dry_run:
+                    for source, source_place_id in place.members:
+                        identity.clear_osm_candidates(
+                            paths.place_identity_db, source, source_place_id
+                        )
+                continue
+            if place.has_coords:
+                poi_rows = osm_db.pois_near(
+                    conn, place.lat, place.lng, max(radius, 150)
+                )
+                matches = rank_matches(place, nearby_candidates(place, poi_rows))
+            else:
+                payload = osm_db.get_nominatim_cache(conn, _nominatim_key(place))
+                if not payload:
+                    summary.none += 1
+                    continue
+                matches = rank_matches(
+                    place, direct_candidates(parse_nominatim_results(payload))
+                )
+            decision, match = decide(matches)
+            if decision == "none" or match is None:
+                summary.none += 1
+                continue
+            if decision == "auto":
+                summary.auto_matched += 1
+                log(
+                    f"OSM: {place.name!r} -> {match.poi.osm_type}/{match.poi.osm_id} "
+                    f"({match.poi.name!r}, {match.score:.2f}, Cache)"
+                )
+                if dry_run:
+                    continue
+                for index, (source, source_place_id) in enumerate(place.members):
+                    identity.upsert_osm_assignment(
+                        paths.place_identity_db,
+                        source,
+                        source_place_id,
+                        match.poi.osm_type,
+                        match.poi.osm_id,
+                        method="auto" if index == 0 else "inherited",
+                        confidence="high",
+                        distance_m=match.distance_m,
+                        note=match.reason,
+                    )
+                    identity.clear_osm_candidates(
+                        paths.place_identity_db, source, source_place_id
+                    )
+            else:
+                summary.candidates += 1
+                if verbose:
+                    log(
+                        f"OSM: Kandidat {place.name!r} ~ "
+                        f"{match.matched_name or match.poi.name!r} "
+                        f"({match.poi.osm_type}/{match.poi.osm_id}, "
+                        f"{match.score:.2f}, {match.reason})"
+                    )
+                if dry_run or not place.members:
+                    continue
+                source, source_place_id = place.members[0]
+                identity.upsert_osm_candidate(
+                    paths.place_identity_db,
+                    source,
+                    source_place_id,
+                    match.poi.osm_type,
+                    match.poi.osm_id,
+                    name=place.name,
+                    city=place.city,
+                    osm_name=match.poi.name,
+                    distance_m=match.distance_m,
+                    score=match.score,
+                    reason=match.reason,
+                )
+    finally:
+        conn.close()
     return summary

@@ -11,6 +11,7 @@ from .config import Paths
 from .identity import (
     load_aliases,
     load_osm_assignments,
+    load_osm_candidate_keys,
     local_key,
     record_aliases,
 )
@@ -173,7 +174,9 @@ CREATE TABLE canonical_places (
     osm_id INTEGER,
     osm_lat REAL,
     osm_lng REAL,
-    match_status TEXT NOT NULL DEFAULT 'local'
+    match_status TEXT NOT NULL DEFAULT 'local',
+    place_kind TEXT NOT NULL DEFAULT 'venue',
+    has_osm_candidate INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE canonical_aliases (
@@ -428,6 +431,7 @@ def build_index(
         osm_assignments = load_osm_assignments(paths.place_identity_db)
         osm_coords = load_osm_coords(paths.osm_db)
         osm_cities = load_osm_cities(paths.osm_db)
+        osm_candidate_keys = load_osm_candidate_keys(paths.place_identity_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
@@ -486,13 +490,16 @@ def build_index(
                 )
                 if osm_coords_for_place:
                     osm_lat, osm_lng = osm_coords_for_place
+            has_osm_candidate = int(
+                any(member.key in osm_candidate_keys for member in canonical.members)
+            )
             cursor = conn.execute(
                 "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
                 "category, category_group, category_group_source, address, "
                 "city, state, postal_code, country_code, primary_source, "
                 "sources_json, source_count, osm_type, osm_id, osm_lat, osm_lng, "
-                "match_status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "match_status, place_kind, has_osm_candidate) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
                     canonical.name,
@@ -514,6 +521,8 @@ def build_index(
                     osm_lat,
                     osm_lng,
                     canonical.match_status,
+                    canonical.place_kind,
+                    has_osm_candidate,
                 ),
             )
             for member in canonical.members:
@@ -704,6 +713,17 @@ def build_index(
         ),
         "osm_conflicts": sum(
             1 for place in canonical_places if place.match_status == "conflict"
+        ),
+        "address_places": sum(
+            1 for place in canonical_places if place.place_kind == "address"
+        ),
+        "without_osm_suggestion": sum(
+            1
+            for place in canonical_places
+            if place.match_status != "osm"
+            and not any(
+                member.key in osm_candidate_keys for member in place.members
+            )
         ),
         "aliases": len(alias_map),
         "index_db": paths.index_db,

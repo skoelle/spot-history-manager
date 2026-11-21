@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.connectors.osm import db as osm_db
 from spot_history.core.config import build_paths
-from spot_history.core.identity import upsert_osm_assignment
+from spot_history.core.identity import upsert_osm_assignment, upsert_osm_candidate
 from spot_history.core.index import build_index
 from spot_history.core.media import thumb_relpath
 from spot_history.core.places import PlaceRule, upsert_rule
@@ -701,6 +701,14 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(counts["all"], 3)
         self.assertEqual(counts["local"], 3)
         self.assertEqual(counts["osm"], 0)
+        self.assertEqual(counts["address"], 0)
+        self.assertEqual(counts["without_suggestion"], 3)
+        self.assertEqual(
+            web_data.count_venues(
+                self.conn, web_data.VenueFilters(kind="venue")
+            ),
+            3,
+        )
         self.assertEqual(
             web_data.count_venues(
                 self.conn, web_data.VenueFilters(match="local")
@@ -725,6 +733,82 @@ class WebDataTest(unittest.TestCase):
             [(member["source"], member["source_place_id"]) for member in members],
             [("fake", "p1")],
         )
+
+    def test_place_kind_and_without_candidate_filter(self):
+        class MixedConnector(BaseConnector):
+            name = "mix"
+            kind = "import"
+
+            def iter_visits(self):
+                yield Visit(
+                    source="mix",
+                    source_visit_id="v1",
+                    visited_at=1700000000,
+                    lat=48.2,
+                    lng=11.6,
+                    place_name="Veilchenweg",
+                    source_place_id="v1",
+                    city="Vaterstetten",
+                )
+                yield Visit(
+                    source="mix",
+                    source_visit_id="v2",
+                    visited_at=1700000100,
+                    lat=48.1,
+                    lng=11.5,
+                    place_name="Cafe Test",
+                    source_place_id="v2",
+                    city="München",
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"mix": MixedConnector()}, paths, log=lambda _: None)
+            upsert_osm_candidate(
+                paths.place_identity_db,
+                "mix",
+                "v2",
+                "node",
+                55,
+                name="Cafe Test",
+                city="München",
+                osm_name="Cafe Test",
+                distance_m=5.0,
+                score=0.9,
+                reason="name_distance",
+            )
+            build_index({"mix": MixedConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                counts = web_data.load_venue_match_counts(conn)
+                self.assertEqual(counts["address"], 1)
+                self.assertEqual(counts["without_suggestion"], 1)
+                self.assertEqual(
+                    web_data.count_venues(
+                        conn, web_data.VenueFilters(kind="address")
+                    ),
+                    1,
+                )
+                self.assertEqual(
+                    web_data.count_venues(conn, web_data.VenueFilters(kind="venue")),
+                    1,
+                )
+                self.assertEqual(
+                    web_data.count_venues(
+                        conn, web_data.VenueFilters(without_candidate=True)
+                    ),
+                    1,
+                )
+                venues = web_data.query_venues(
+                    conn, web_data.VenueFilters(), limit=10, offset=0
+                )
+                by_name = {venue["name"]: venue for venue in venues}
+                self.assertEqual(by_name["Veilchenweg"]["place_kind"], "address")
+                self.assertFalse(by_name["Veilchenweg"]["has_osm_candidate"])
+                self.assertEqual(by_name["Cafe Test"]["place_kind"], "venue")
+                self.assertTrue(by_name["Cafe Test"]["has_osm_candidate"])
+            finally:
+                conn.close()
 
     def test_osm_filter_after_manual_assignment(self):
         with tempfile.TemporaryDirectory() as tmp:

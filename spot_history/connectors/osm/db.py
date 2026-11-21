@@ -9,6 +9,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+ALT_NAME_TAGS = (
+    "alt_name",
+    "old_name",
+    "official_name",
+    "short_name",
+    "loc_name",
+    "brand",
+    "operator",
+    "name:de",
+    "name:en",
+    "disused:name",
+    "abandoned:name",
+    "was:name",
+)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pois (
     osm_type TEXT NOT NULL,
@@ -70,6 +85,27 @@ class Poi:
     @property
     def city(self) -> str | None:
         return self.tags.get("addr:city") or self.tags.get("addr:suburb")
+
+    @property
+    def municipality(self) -> str | None:
+        city = self.tags.get("addr:city")
+        return str(city) if city else None
+
+    def name_variants(self) -> list[tuple[str, str]]:
+        """Return (name, tag) pairs, current name first, then OSM aliases."""
+        variants: list[tuple[str, str]] = [(self.name, "name")]
+        seen = {self.name.strip().casefold()}
+        for tag in ALT_NAME_TAGS:
+            raw = self.tags.get(tag)
+            if not raw:
+                continue
+            for part in str(raw).split(";"):
+                value = part.strip()
+                key = value.casefold()
+                if value and key not in seen:
+                    seen.add(key)
+                    variants.append((value, tag))
+        return variants
 
     @property
     def postcode(self) -> str | None:
@@ -213,6 +249,29 @@ def poi_locations(
                 "lat": row["lat"],
                 "lng": row["lng"],
             }
+    finally:
+        conn.close()
+    return result
+
+
+def poi_names(
+    path: Path, keys: set[tuple[str, int]] | list[tuple[str, int]]
+) -> dict[tuple[str, int], str]:
+    if not keys or not path.exists():
+        return {}
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    result: dict[tuple[str, int], str] = {}
+    try:
+        for osm_type, osm_id in keys:
+            row = conn.execute(
+                "SELECT osm_type, osm_id, name FROM pois "
+                "WHERE osm_type = ? AND osm_id = ?",
+                (osm_type, int(osm_id)),
+            ).fetchone()
+            if not row or not row["name"]:
+                continue
+            result[(row["osm_type"], int(row["osm_id"]))] = row["name"]
     finally:
         conn.close()
     return result

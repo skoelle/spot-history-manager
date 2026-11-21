@@ -2,16 +2,18 @@
 # Licensed under the MIT License. See LICENSE file in project root for details.
 from __future__ import annotations
 
+import difflib
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ...core.places import normalize_name
+from ...core.places import looks_like_address, normalize_name
 from .db import Poi, haversine_m
 
 AUTO_SCORE = 0.80
 CANDIDATE_SCORE = 0.55
 AMBIGUOUS_MARGIN = 0.05
+FUZZY_MIN_SIMILARITY = 0.70
 
 
 @dataclass
@@ -39,6 +41,10 @@ class Match:
     distance_m: float | None
     name_score: float
     reason: str
+    matched_name: str | None = None
+    name_tag: str = "name"
+    alternate: bool = False
+    fuzzy: bool = False
 
 
 def load_index_places(index_db: Path) -> list[IndexPlace]:
@@ -103,14 +109,63 @@ def name_similarity(left: str | None, right: str | None) -> float:
     return len(tokens_a & tokens_b) / len(union)
 
 
+def _fuzzy_similarity(left: str | None, right: str | None) -> float:
+    a = normalize_name(left)
+    b = normalize_name(right)
+    if not a or not b or min(len(a), len(b)) < 5:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _name_match(
+    place_name: str | None,
+    poi: Poi,
+    *,
+    allow_alt: bool,
+    allow_fuzzy: bool,
+) -> tuple[float, str, str, bool]:
+    best = (0.0, poi.name, "name", False)
+    variants = poi.name_variants() if allow_alt else [(poi.name, "name")]
+    for value, tag in variants:
+        base = name_similarity(place_name, value)
+        fuzzy = (
+            _fuzzy_similarity(place_name, value)
+            if allow_fuzzy and base < FUZZY_MIN_SIMILARITY
+            else 0.0
+        )
+        if fuzzy >= FUZZY_MIN_SIMILARITY and fuzzy > base:
+            similarity, is_fuzzy = fuzzy, True
+        elif base > 0.0:
+            similarity, is_fuzzy = base, False
+        else:
+            continue
+        if similarity > best[0]:
+            best = (similarity, value, tag, is_fuzzy)
+    return best
+
+
+def _city_matches(place: IndexPlace, poi: Poi) -> bool:
+    city = normalize_name(place.city)
+    return bool(city) and city == normalize_name(poi.municipality)
+
+
 def score_poi(
     place: IndexPlace,
     poi: Poi,
     distance_m: float | None,
+    *,
+    allow_alt: bool = True,
+    allow_fuzzy: bool = True,
 ) -> Match | None:
-    similarity = name_similarity(place.name, poi.name)
+    if looks_like_address(place.name):
+        return None
+
+    similarity, matched_name, name_tag, fuzzy = _name_match(
+        place.name, poi, allow_alt=allow_alt, allow_fuzzy=allow_fuzzy
+    )
     if similarity <= 0.0:
         return None
+    alternate = name_tag != "name"
 
     name_score = 0.6 if similarity >= 0.99 else 0.5 * similarity
 
@@ -125,11 +180,11 @@ def score_poi(
             location_score = 0.03
         else:
             return None
-        if normalize_name(place.city) and normalize_name(place.city) == normalize_name(poi.city):
+        if _city_matches(place, poi):
             location_score += 0.05
     else:
         location_score = 0.1
-        if normalize_name(place.city) and normalize_name(place.city) == normalize_name(poi.city):
+        if _city_matches(place, poi):
             location_score = 0.25
         if place.postcode and place.postcode == poi.postcode:
             location_score += 0.1
@@ -138,17 +193,23 @@ def score_poi(
         location_score += 0.05
 
     score = min(1.0, name_score + location_score)
-    reason = (
-        "name_distance"
-        if distance_m is not None
-        else "name_city"
-    )
+    suffix = "_distance" if distance_m is not None else "_city"
+    if fuzzy:
+        reason = "fuzzy" + suffix
+    elif alternate:
+        reason = "alt_name" + suffix
+    else:
+        reason = "name" + suffix
     return Match(
         poi=poi,
         score=round(score, 3),
         distance_m=round(distance_m, 1) if distance_m is not None else None,
         name_score=round(name_score, 3),
         reason=reason,
+        matched_name=matched_name,
+        name_tag=name_tag,
+        alternate=alternate,
+        fuzzy=fuzzy,
     )
 
 
@@ -174,7 +235,7 @@ def decide(matches: list[Match]) -> tuple[str, Match | None]:
     if not matches:
         return "none", None
     best = matches[0]
-    if best.score >= AUTO_SCORE:
+    if best.score >= AUTO_SCORE and not best.alternate and not best.fuzzy:
         if (
             len(matches) > 1
             and matches[1].score >= best.score - AMBIGUOUS_MARGIN

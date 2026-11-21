@@ -14,6 +14,7 @@ from spot_history.core.places import (
     delete_rule,
     haversine_m,
     load_rules,
+    looks_like_address,
     normalize_name,
     resolve_canonical_places,
     upsert_rule,
@@ -52,6 +53,40 @@ class PlacesMatchTest(unittest.TestCase):
         self.assertEqual(normalize_name("Straße"), "strasse")
         self.assertEqual(normalize_name("München"), "muenchen")
         self.assertEqual(normalize_name(None), "")
+
+    def test_looks_like_address(self):
+        for name in (
+            "Veilchenweg",
+            "Heinestraße",
+            "Ludwig-Erhard-Straße",
+            "Perlacher Straße 55",
+            "Truderinger Straße",
+            "Seeweg 7",
+            "A 14",
+            "N 12",
+            "12",
+        ):
+            self.assertTrue(looks_like_address(name), name)
+        for name in (
+            "Michaeligarten",
+            "Gasteig",
+            "Potsdamer Platz Arkaden",
+            "Englischer Garten",
+            "Stadtcafé",
+            "Café 7",
+            "Café am Weg",
+            "Restaurant an der Straße",
+            "Studio 54",
+        ):
+            self.assertFalse(looks_like_address(name), name)
+
+    def test_place_kind_address_from_semantic_type(self):
+        places = [
+            place("google", "g1", "Unbekannt", 48.1, 11.5),
+        ]
+        places[0].semantic_type = "Searched Address"
+        canonical, _ = resolve_canonical_places(places)
+        self.assertEqual(canonical[0].place_kind, "address")
 
     def test_haversine(self):
         self.assertAlmostEqual(haversine_m(48.1, 11.5, 48.1, 11.5), 0.0)

@@ -214,6 +214,8 @@ def venues(
     source: str | None = None,
     q: str | None = None,
     match: str | None = None,
+    kind: str | None = None,
+    without_candidate: str | None = None,
     page: int = 1,
 ) -> HTMLResponse:
     index_db = paths.index_db
@@ -227,7 +229,14 @@ def venues(
                 "index_path": str(index_db),
                 "venues": [],
                 "options": {"cities": [], "category_groups": [], "categories": [], "sources": []},
-                "match_counts": {"all": 0, "osm": 0, "local": 0, "conflict": 0},
+                "match_counts": {
+                    "all": 0,
+                    "osm": 0,
+                    "local": 0,
+                    "conflict": 0,
+                    "address": 0,
+                    "without_suggestion": 0,
+                },
                 "total": 0,
                 "page": 1,
                 "pages": 1,
@@ -241,6 +250,15 @@ def venues(
     match_value = (match or "").strip() or None
     if match_value not in ("osm", "local", "conflict", "unmatched"):
         match_value = None
+    kind_value = (kind or "").strip() or None
+    if kind_value not in ("venue", "address"):
+        kind_value = None
+    without_candidate_value = (without_candidate or "").strip() in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    )
     conn = web_data.connect(index_db)
     try:
         profiles = web_data.load_profiles(conn)
@@ -257,6 +275,8 @@ def venues(
             source=(source or "").strip() or None,
             q=(q or "").strip() or None,
             match=match_value,
+            kind=kind_value,
+            without_candidate=without_candidate_value,
         )
         total = web_data.count_venues(conn, filters)
         pages = max(1, (total + web_data.PAGE_SIZE - 1) // web_data.PAGE_SIZE)
@@ -274,6 +294,8 @@ def venues(
         "source": source or "",
         "q": q or "",
         "match": match_value or "",
+        "kind": kind_value or "",
+        "without_candidate": "1" if without_candidate_value else "",
     }
     return templates.TemplateResponse(
         request,
@@ -425,6 +447,10 @@ def venue_detail(
         if (candidate["source"], candidate["source_place_id"]) in member_keys
     ]
     osm_path = paths.connector_dir("osm") / "osm.db"
+    osm_name = None
+    if venue["osm_type"] and venue["osm_id"] is not None:
+        venue_osm_key = (venue["osm_type"], int(venue["osm_id"]))
+        osm_name = osm_db.poi_names(osm_path, {venue_osm_key}).get(venue_osm_key)
     candidate_keys = {
         (candidate["osm_type"], int(candidate["osm_id"]))
         for candidate in osm_candidates
@@ -450,6 +476,7 @@ def venue_detail(
         {
             "request": request,
             "venue": venue,
+            "osm_name": osm_name,
             "visits": visits,
             "photos": photos,
             "total": total,

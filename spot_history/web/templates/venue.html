@@ -44,6 +44,7 @@
                 {% if venue.coords_source == 'osm' %}<span class="badge">OSM</span>{% endif %}
             </span>
             {% endif %}
+            {% if venue.place_kind == 'address' %}<span class="badge derived">Adresse</span>{% endif %}
             {% if venue.osm_url %}
             <span>OSM: <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a></span>
             {% elif venue.match_status == 'conflict' %}
@@ -298,6 +299,9 @@
                     <span class="muted">
                         {% if candidate.score is not none %}Score {{ "%.2f"|format(candidate.score) }}{% endif %}
                         {% if candidate.distance_m is not none %} · {{ "%.0f"|format(candidate.distance_m) }} m{% endif %}
+                        {% if candidate.reason and candidate.reason.startswith('alt_name') %} · über Alt-/Alternativnamen
+                        {% elif candidate.reason and candidate.reason.startswith('fuzzy') %} · unscharfer Namensvergleich
+                        {% endif %}
                     </span>
                     <button type="submit">Übernehmen</button>
                 </form>
@@ -333,6 +337,17 @@
         {% if members|length > 1 %}
         <div class="merge-members">
             <div class="merge-candidates-title">Aktuell zusammengeführt</div>
+            {% if venue.osm_url %}
+            <div class="merge-candidate">
+                <span class="merge-candidate-name">
+                    <span class="badge source-osm">osm</span>
+                    {{ osm_name or (venue.osm_type ~ '/' ~ venue.osm_id) }}
+                    {% if osm_name %}
+                    <a class="original-link" href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a>
+                    {% endif %}
+                </span>
+            </div>
+            {% endif %}
             {% for member in members %}
             <div class="merge-candidate">
                 <span class="merge-candidate-name">

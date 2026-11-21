@@ -299,6 +299,10 @@ python3 -m spot_history osm sync
 python3 -m spot_history osm sync --limit 25 --dry-run --verbose
 python3 -m spot_history osm sync --provider nominatim
 
+# Offline-Rematch gegen den vorhandenen POI-Cache (kein Netzwerk)
+python3 -m spot_history osm rematch --dry-run --verbose
+python3 -m spot_history osm rematch
+
 # Danach OSM-Keys in den Index übernehmen
 python3 -m spot_history index build
 
@@ -306,6 +310,7 @@ python3 -m spot_history index build
 python3 -m spot_history osm stats
 python3 -m spot_history places osm-candidates [--json]
 python3 -m spot_history places unmatched [--city München] [--json]
+python3 -m spot_history places unmatched --kind venue --without-candidate
 
 # Kandidat oder manuelle OSM-ID übernehmen / Zuordnung entfernen
 python3 -m spot_history places osm-accept foursquare:<venue_id>
@@ -319,12 +324,18 @@ python3 -m spot_history places unassign-osm foursquare:<venue_id>
 - Overpass wird gebündelt pro `--chunk`-Punkte abgefragt (Default 40, Radius
   120 m). Schlägt ein Batch fehl, werden die betroffenen Orte über Nominatim
   nachgeladen; Nominatim wird mit maximal ca. 1 Request/s und Cache genutzt.
-- Automatische Zuordnung nur bei eindeutigem, hohem Score
-  (Name + Distanz/Stadt). Alles andere landet als Kandidat in der
-  Identitäts-DB und muss über `osm-accept`, `assign-osm` oder die Web-UI
-  bestätigt werden.
+- Automatische Zuordnung nur bei eindeutigem, hohem Score über den aktuellen
+  OSM-Namen (Name + Distanz/Stadt). Treffer über Alt-/Alternativnamen
+  (`old_name`, `alt_name`, `brand`, `operator`, `name:*`) oder unscharfen
+  Namensvergleich landen immer als Kandidat in der Identitäts-DB und müssen
+  über `osm-accept`, `assign-osm` oder die Web-UI bestätigt werden.
+- `osm rematch` wertet offene Orte ausschließlich gegen `data/osm/osm.db` aus
+  (kein Overpass/Nominatim) und ergänzt so auch nachträglich Kandidaten aus
+  dem Cache. Adress-/Straßennamen werden dabei als `place_kind = address`
+  geführt und nicht als Venue gematcht.
 - `--force` ignoriert den Abfrage-Cache; `--dry-run` matcht nur und schreibt
-  keine Zuordnungen.
+  keine Zuordnungen. In der Ortsliste gibt es Filter für Ortsart
+  (Venue/Adresse) und „ohne OSM-Vorschlag“.
 - Gematchte Orte übernehmen die gecachten OSM-Koordinaten in den Index
   (`osm_lat`/`osm_lng`). Hauptkarte, Venue-Detailseite und `visits.geojson`
   bevorzugen diese Position; fehlt sie, gelten weiter die Quellkoordinaten.

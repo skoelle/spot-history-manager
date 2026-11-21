@@ -21,7 +21,7 @@ from spot_history.connectors.osm.overpass import (
     parse_nominatim_results,
     parse_overpass_elements,
 )
-from spot_history.connectors.osm.sync import sync
+from spot_history.connectors.osm.sync import rematch, sync
 from spot_history.core import identity
 from spot_history.core.config import build_paths
 from spot_history.core.index import build_index
@@ -43,6 +43,24 @@ class FakeConnector(BaseConnector):
             source_place_id="p1",
             category="Café",
             city="München",
+            country_code="DE",
+        )
+
+
+class AddressConnector(BaseConnector):
+    name = "addr"
+    kind = "import"
+
+    def iter_visits(self):
+        yield Visit(
+            source="addr",
+            source_visit_id="a1",
+            visited_at=1700000000,
+            lat=48.2,
+            lng=11.6,
+            place_name="Veilchenweg",
+            source_place_id="a1",
+            city="Vaterstetten",
             country_code="DE",
         )
 
@@ -100,6 +118,49 @@ class MatcherTest(unittest.TestCase):
         self.assertEqual(decision, "auto")
         self.assertEqual(match.poi.osm_id, 123)
 
+    def test_alternate_name_is_candidate_not_auto(self):
+        renamed = osm_db.Poi(
+            osm_type="node",
+            osm_id=321,
+            name="Nash",
+            lat=48.1001,
+            lng=11.5,
+            tags={
+                "amenity": "cafe",
+                "addr:city": "München",
+                "old_name": "Testort",
+            },
+        )
+        matches = rank_matches(place(), [(renamed, 9.0)])
+        decision, match = decide(matches)
+        self.assertEqual(decision, "candidate")
+        self.assertIsNotNone(match)
+        self.assertTrue(match.alternate)
+        self.assertEqual(match.name_tag, "old_name")
+        self.assertEqual(match.matched_name, "Testort")
+        self.assertTrue(match.reason.startswith("alt_name"))
+
+    def test_fuzzy_name_is_candidate_not_auto(self):
+        typo = osm_db.Poi(
+            osm_type="node",
+            osm_id=322,
+            name="Cafe Testrot",
+            lat=48.1001,
+            lng=11.5,
+            tags={"amenity": "cafe", "addr:city": "München"},
+        )
+        matches = rank_matches(place(name="Cafe Testort"), [(typo, 9.0)])
+        decision, match = decide(matches)
+        self.assertEqual(decision, "candidate")
+        self.assertIsNotNone(match)
+        self.assertTrue(match.fuzzy)
+        self.assertTrue(match.reason.startswith("fuzzy"))
+
+    def test_address_names_are_ignored(self):
+        for name in ("Veilchenweg", "Perlacher Straße 55", "A 14", "12"):
+            matches = rank_matches(place(name=name), [(poi(name=name), 5.0)])
+            self.assertEqual(decide(matches), ("none", None), name)
+
 
 class ParserTest(unittest.TestCase):
     def test_parse_overpass_elements(self):
@@ -149,6 +210,26 @@ class ParserTest(unittest.TestCase):
             locations = osm_db.poi_locations(path, {("way", 123), ("way", 999)})
             self.assertEqual(set(locations), {("way", 123)})
             self.assertAlmostEqual(locations[("way", 123)]["lat"], 48.1001)
+
+    def test_poi_names_by_osm_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "osm" / "osm.db"
+            conn = osm_db.open_db(path)
+            try:
+                osm_db.save_pois(
+                    conn,
+                    [
+                        poi(name="Testort", osm_id=123),
+                        poi(name="Ohne Koordinaten", lat=None, lng=None, osm_id=456),
+                    ],
+                )
+            finally:
+                conn.close()
+            names = osm_db.poi_names(path, {("way", 123), ("way", 456), ("way", 999)})
+            self.assertEqual(
+                names,
+                {("way", 123): "Testort", ("way", 456): "Ohne Koordinaten"},
+            )
 
     def test_load_osm_cities(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -284,6 +365,103 @@ class SyncTest(unittest.TestCase):
             candidates = identity.load_osm_candidates(paths.place_identity_db)
             self.assertEqual(len(candidates), 1)
             self.assertEqual(candidates[0]["osm_id"], 123)
+
+    def test_sync_skips_address_places(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"addr": AddressConnector()}, paths, log=lambda _: None)
+            fake_overpass = mock.Mock()
+            fake_overpass.fetch_around.return_value = []
+            with (
+                mock.patch(
+                    "spot_history.connectors.osm.sync.OverpassClient",
+                    return_value=fake_overpass,
+                ),
+                mock.patch("spot_history.connectors.osm.sync.NominatimClient"),
+            ):
+                summary = sync(paths, sleep=0.0, log=lambda _: None)
+            self.assertEqual(summary.pending, 0)
+            self.assertEqual(summary.addresses, 1)
+            fake_overpass.fetch_around.assert_not_called()
+
+    def test_rematch_uses_cached_pois_without_queries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = osm_db.open_db(paths.connector_dir("osm") / "osm.db")
+            osm_db.save_pois(conn, [poi()])
+            conn.close()
+            summary = rematch(paths, log=lambda _: None)
+            self.assertEqual(summary.pending, 1)
+            self.assertEqual(summary.auto_matched, 1)
+            self.assertEqual(summary.candidates, 0)
+            assignments = identity.load_osm_assignments(paths.place_identity_db)
+            self.assertEqual(assignments[("fake", "p1")].osm_id, 123)
+
+    def test_rematch_alt_name_stays_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = osm_db.open_db(paths.connector_dir("osm") / "osm.db")
+            osm_db.save_pois(
+                conn,
+                [
+                    osm_db.Poi(
+                        osm_type="node",
+                        osm_id=321,
+                        name="Nash",
+                        lat=48.1001,
+                        lng=11.5,
+                        tags={
+                            "amenity": "cafe",
+                            "addr:city": "München",
+                            "old_name": "Testort",
+                        },
+                    )
+                ],
+            )
+            conn.close()
+            summary = rematch(paths, log=lambda _: None)
+            self.assertEqual(summary.auto_matched, 0)
+            self.assertEqual(summary.candidates, 1)
+            self.assertEqual(identity.load_osm_assignments(paths.place_identity_db), {})
+            candidates = identity.load_osm_candidates(paths.place_identity_db)
+            self.assertEqual(candidates[0]["osm_name"], "Nash")
+            self.assertTrue(candidates[0]["reason"].startswith("alt_name"))
+
+    def test_rematch_skips_address_places(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"addr": AddressConnector()}, paths, log=lambda _: None)
+            identity.upsert_osm_candidate(
+                paths.place_identity_db,
+                "addr",
+                "a1",
+                "node",
+                9,
+                name="Veilchenweg",
+                osm_name="Veilchenweg",
+            )
+            conn = osm_db.open_db(paths.connector_dir("osm") / "osm.db")
+            osm_db.save_pois(
+                conn,
+                [
+                    osm_db.Poi(
+                        osm_type="way",
+                        osm_id=1,
+                        name="Veilchenweg",
+                        lat=48.2,
+                        lng=11.6,
+                        tags={"highway": "residential"},
+                    )
+                ],
+            )
+            conn.close()
+            summary = rematch(paths, log=lambda _: None)
+            self.assertEqual(summary.addresses, 1)
+            self.assertEqual(summary.auto_matched, 0)
+            self.assertEqual(identity.load_osm_assignments(paths.place_identity_db), {})
+            self.assertEqual(identity.load_osm_candidates(paths.place_identity_db), [])
 
 
 if __name__ == "__main__":

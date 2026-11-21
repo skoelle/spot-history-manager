@@ -78,6 +78,21 @@
                 {% endif %}
             </select>
         </label>
+        <label class="field">
+            <span>Ortsart</span>
+            <select name="kind">
+                <option value="" {% if not query.kind %}selected{% endif %}>Alle</option>
+                <option value="venue" {% if query.kind == 'venue' %}selected{% endif %}>Venues</option>
+                <option value="address" {% if query.kind == 'address' %}selected{% endif %}>Adressen ({{ match_counts.address }})</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>OSM-Vorschlag</span>
+            <select name="without_candidate">
+                <option value="" {% if not query.without_candidate %}selected{% endif %}>Alle</option>
+                <option value="1" {% if query.without_candidate %}selected{% endif %}>Ohne Vorschlag ({{ match_counts.without_suggestion }})</option>
+            </select>
+        </label>
         <label class="field field-search">
             <span>Suche</span>
             <input type="search" name="q" value="{{ query.q }}" placeholder="Ort, Kategorie, Adresse, Stadt ...">
@@ -110,9 +125,11 @@
                 <tr>
                     <td>
                         <a href="/venues/{{ venue.key }}">{{ venue.name or 'Unbekannter Ort' }}</a>
+                        {% if venue.place_kind == 'address' %}<span class="badge derived">Adresse</span>{% endif %}
                         {% if venue.match_status == 'osm' %}<span class="badge">OSM</span>
                         {% elif venue.match_status == 'conflict' %}<span class="badge derived">Konflikt</span>
                         {% else %}<span class="badge">lokal</span>{% endif %}
+                        {% if venue.has_osm_candidate %}<span class="badge derived">Vorschlag</span>{% endif %}
                     </td>
                     <td>{{ venue.city or '—' }}</td>
                     <td>

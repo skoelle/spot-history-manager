@@ -53,6 +53,21 @@ class OsmConnector(BaseConnector):
         sync_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
         sync_parser.set_defaults(func=self.run)
 
+        rematch_parser = commands.add_parser(
+            "rematch",
+            parents=[common],
+            help="offene Orte offline gegen den POI-Cache matchen",
+        )
+        rematch_parser.add_argument(
+            "--radius", type=int, default=120, help="Suchradius in Metern (default: 120)"
+        )
+        rematch_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte")
+        rematch_parser.add_argument(
+            "--dry-run", action="store_true", help="nur anzeigen, nichts schreiben"
+        )
+        rematch_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
+        rematch_parser.set_defaults(func=self.run)
+
         stats_parser = commands.add_parser(
             "stats", parents=[common], help="Cache- und Zuordnungszahlen anzeigen"
         )
@@ -67,6 +82,8 @@ class OsmConnector(BaseConnector):
             return self._stats(args, paths)
         if args.command == "sync":
             return self._sync(args, paths)
+        if args.command == "rematch":
+            return self._rematch(args, paths)
         print(f"Unbekannter osm-Befehl: {args.command}")
         return 2
 
@@ -95,9 +112,36 @@ class OsmConnector(BaseConnector):
         print(f"POIs gespeichert:  {summary.pois}")
         print(f"Automatisch:       {summary.auto_matched}")
         print(f"Kandidaten:        {summary.candidates}")
+        print(f"Adresspunkte:      {summary.addresses}")
         print(f"Fehler:            {summary.errors}")
         if args.dry_run:
             print("Dry-Run: keine Zuordnungen geschrieben.")
+        print("Danach: python3 -m spot_history index build")
+        return 0
+
+    def _rematch(self, args: argparse.Namespace, paths) -> int:
+        from .sync import rematch
+
+        try:
+            summary = rematch(
+                paths,
+                radius=args.radius,
+                limit=args.limit,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                osm_db_path=self._db_path(args, paths),
+            )
+        except FileNotFoundError as exc:
+            print(f"Fehler: {exc}")
+            return 1
+        print(f"Orte gesamt:       {summary.places}")
+        print(f"Offen:             {summary.pending}")
+        print(f"Automatisch:       {summary.auto_matched}")
+        print(f"Kandidaten:        {summary.candidates}")
+        print(f"Ohne Treffer:      {summary.none}")
+        print(f"Adresspunkte:      {summary.addresses}")
+        if args.dry_run:
+            print("Dry-Run: keine Zuordnungen/Kandidaten geschrieben.")
         print("Danach: python3 -m spot_history index build")
         return 0
 

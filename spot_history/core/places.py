@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 import unicodedata
 from collections.abc import Iterable
@@ -22,6 +23,55 @@ FUZZY_DISTANCE_M = 25.0
 FUZZY_AUTO_SIMILARITY = 0.9
 FUZZY_CANDIDATE_SIMILARITY = 0.78
 OSM_CONFLICT_CANDIDATE_DISTANCE_M = 250.0
+
+_STREET_SUFFIXES = (
+    "strasse",
+    "str.",
+    "weg",
+    "allee",
+    "chaussee",
+    "avenue",
+    "road",
+    "street",
+    "lane",
+    "drive",
+    "boulevard",
+    "vegur",
+    "vej",
+    "vag",
+    "veien",
+    "vegen",
+    "gata",
+    "gate",
+    "straat",
+    "rue",
+    "via",
+    "calle",
+    "leid",
+)
+_PLACE_SUFFIXES = ("platz", "ufer", "gasse", "ring", "damm", "steig", "pfad")
+_ROAD_SUFFIXES = _STREET_SUFFIXES + _PLACE_SUFFIXES
+_VENUE_PREFIXES = {
+    "cafe",
+    "restaurant",
+    "bar",
+    "biergarten",
+    "hotel",
+    "museum",
+    "gasthaus",
+    "wirtshaus",
+    "brauerei",
+    "stuberl",
+    "imbiss",
+    "club",
+    "kiosk",
+    "laden",
+    "shop",
+    "galerie",
+}
+_PREPOSITIONS = {"am", "an", "auf", "beim", "der", "des", "im", "in", "zum", "zur"}
+_HIGHWAY_REF_RE = re.compile(r"^[a-z]{1,3}\s?-?\s?\d{1,3}[a-z]?$")
+_HOUSE_NUMBER_RE = re.compile(r"\d{1,4}[a-z]?")
 
 RULES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS place_rules (
@@ -52,6 +102,50 @@ def normalize_name(value: str | None) -> str:
     )
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     return " ".join(text.split())
+
+
+def _ends_with_suffix(
+    text: str, suffixes: tuple[str, ...], *, min_stem: int = 0
+) -> bool:
+    last = text.rsplit(" ", 1)[-1]
+    for suffix in suffixes:
+        if last == suffix:
+            if min_stem <= 0:
+                return True
+            continue
+        if last.endswith(suffix) and len(last) - len(suffix) >= min_stem:
+            return True
+    return False
+
+
+def _has_road_suffix(text: str) -> bool:
+    return _ends_with_suffix(text, _ROAD_SUFFIXES)
+
+
+def _has_street_suffix(text: str) -> bool:
+    return _ends_with_suffix(text, _STREET_SUFFIXES)
+
+
+def looks_like_address(value: str | None) -> bool:
+    """Heuristic for address and street names that are not venues."""
+    text = normalize_name(value)
+    if not text:
+        return False
+    if text.isdigit():
+        return True
+    if _HIGHWAY_REF_RE.match(text):
+        return True
+    tokens = text.split()
+    if len(tokens) >= 2 and _HOUSE_NUMBER_RE.fullmatch(tokens[-1]):
+        head = " ".join(tokens[:-1])
+        if _has_road_suffix(head) or "-" in head:
+            return True
+    if len(tokens) == 1:
+        return _ends_with_suffix(tokens[0], _ROAD_SUFFIXES, min_stem=3)
+    if _has_street_suffix(text):
+        first = tokens[0]
+        return first not in _VENUE_PREFIXES and first not in _PREPOSITIONS
+    return False
 
 
 def haversine_m(
@@ -149,6 +243,7 @@ class SourcePlace:
     place_url: str | None = None
     visit_count: int = 0
     comment_only: bool = False
+    semantic_type: str | None = None
     osm_type: str | None = None
     osm_id: int | None = None
 
@@ -298,6 +393,17 @@ class CanonicalPlace:
     def sources(self) -> list[str]:
         return [member.source for member in self.sorted_members]
 
+    @property
+    def place_kind(self) -> str:
+        if any(
+            (member.semantic_type or "").casefold() == "searched address"
+            for member in self.members
+        ):
+            return "address"
+        if looks_like_address(self.name):
+            return "address"
+        return "venue"
+
 
 class _UnionFind:
     def __init__(self) -> None:
@@ -365,6 +471,9 @@ def collect_source_places(visits: Iterable[Any]) -> dict[tuple[str, str], Source
         extra = getattr(visit, "extra", None) or {}
         if extra.get("comment_only"):
             place.comment_only = True
+        semantic_type = extra.get("semantic_type")
+        if semantic_type:
+            place.semantic_type = str(semantic_type)
         osm_type = extra.get("osm_type")
         osm_id = extra.get("osm_id")
         if osm_type and osm_id is not None:

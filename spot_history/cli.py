@@ -32,6 +32,11 @@ def _run_index(args: argparse.Namespace, connectors) -> int:
     )
     print(f"Index:    {summary['index_db']}")
     print(f"GeoJSON:  {summary['geojson']}")
+    print(
+        f"OSM:      {summary['matched_osm']} mit ID, "
+        f"{summary['address_places']} Adresspunkte, "
+        f"{summary['without_osm_suggestion']} ohne Vorschlag"
+    )
     return 0
 
 
@@ -250,6 +255,17 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
                 "GROUP BY match_status"
             )
         }
+        address_places = conn.execute(
+            "SELECT COUNT(*) FROM canonical_places WHERE place_kind = 'address'"
+        ).fetchone()[0]
+        without_suggestion = conn.execute(
+            "SELECT COUNT(*) FROM canonical_places "
+            "WHERE match_status != 'osm' AND has_osm_candidate = 0"
+        ).fetchone()[0]
+        candidate_places = conn.execute(
+            "SELECT COUNT(*) FROM canonical_places "
+            "WHERE match_status != 'osm' AND has_osm_candidate = 1"
+        ).fetchone()[0]
     finally:
         conn.close()
     rules = place_core.load_rules(paths.place_rules_db)
@@ -261,6 +277,9 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     print(f"Mit OSM-ID:        {match_counts.get('osm', 0)}")
     print(f"Ohne OSM-ID:       {match_counts.get('local', 0)}")
     print(f"OSM-Konflikte:     {match_counts.get('conflict', 0)}")
+    print(f"Adresspunkte:      {address_places}")
+    print(f"OSM-Kandidaten:    {candidate_places}")
+    print(f"Ohne Vorschlag:    {without_suggestion}")
     print(f"Quell-Links:       {counts['place_links']} ({linked} mit URL)")
     print(f"Merge-Vorschläge:  {counts['merge_candidates']}")
     print(f"Manuelle Merges:   {manual_merges}")
@@ -386,12 +405,20 @@ def _run_unmatched(args: argparse.Namespace, paths) -> int:
     if args.city:
         clauses.append("city = ?")
         params.append(args.city)
+    kind = getattr(args, "kind", None)
+    if kind:
+        clauses.append("place_kind = ?")
+        params.append(kind)
+    without_candidate = getattr(args, "without_candidate", False)
+    if without_candidate:
+        clauses.append("has_osm_candidate = 0")
     limit = f" LIMIT {int(args.limit)}" if args.limit else ""
     try:
         rows = [
             dict(row)
             for row in conn.execute(
-                "SELECT canonical_key, name, city, match_status, osm_type, osm_id "
+                "SELECT canonical_key, name, city, match_status, osm_type, osm_id, "
+                "place_kind, has_osm_candidate "
                 "FROM canonical_places "
                 f"WHERE {' AND '.join(clauses)} "
                 "ORDER BY city, name"
@@ -405,12 +432,14 @@ def _run_unmatched(args: argparse.Namespace, paths) -> int:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
     if not rows:
-        print("Alle Orte haben eine OSM-ID.")
+        print("Keine passenden Orte ohne OSM-ID.")
         return 0
     for row in rows:
+        suffix = " [Adresse]" if row["place_kind"] == "address" else ""
+        proposal = " +Kandidat" if row["has_osm_candidate"] else ""
         print(
             f"{row['canonical_key']}  {row['name'] or '-'}  "
-            f"[{row['city'] or '-'}, {row['match_status']}]"
+            f"[{row['city'] or '-'}, {row['match_status']}{suffix}{proposal}]"
         )
     return 0
 
@@ -588,6 +617,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     unmatched_parser.add_argument("--city", help="nur diese Stadt")
     unmatched_parser.add_argument("--limit", type=int, help="maximale Anzahl")
+    unmatched_parser.add_argument(
+        "--kind", choices=("venue", "address"), help="nur Venues oder Adresspunkte"
+    )
+    unmatched_parser.add_argument(
+        "--without-candidate",
+        action="store_true",
+        help="nur Orte ohne OSM-Kandidat",
+    )
     unmatched_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
     unmatched_parser.add_argument("--json", action="store_true")
     unmatched_parser.set_defaults(func=lambda args: _run_places(args, connectors))

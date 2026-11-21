@@ -334,6 +334,13 @@ def load_osm_candidates(path: Path, limit: int | None = None) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def load_osm_candidate_keys(path: Path) -> set[tuple[str, str]]:
+    return {
+        (row["source"], row["source_place_id"])
+        for row in load_osm_candidates(path)
+    }
+
+
 def record_aliases(path: Path, aliases: dict[str, str]) -> None:
     pairs = [
         (alias, target)

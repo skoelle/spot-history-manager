@@ -42,6 +42,8 @@ class VenueFilters:
     source: str | None = None
     q: str | None = None
     match: str | None = None
+    kind: str | None = None
+    without_candidate: bool = False
 
 
 @dataclass(frozen=True)
@@ -538,6 +540,12 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
         params.append(filters.match)
     elif filters.match == "unmatched":
         clauses.append("p.match_status != 'osm'")
+    if filters.kind in ("venue", "address"):
+        clauses.append("p.place_kind = ?")
+        params.append(filters.kind)
+    if filters.without_candidate:
+        clauses.append("p.match_status != 'osm'")
+        clauses.append("p.has_osm_candidate = 0")
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
@@ -581,7 +589,14 @@ def load_venue_options(conn: sqlite3.Connection) -> dict:
 
 
 def load_venue_match_counts(conn: sqlite3.Connection) -> dict:
-    counts = {"all": 0, "osm": 0, "local": 0, "conflict": 0}
+    counts = {
+        "all": 0,
+        "osm": 0,
+        "local": 0,
+        "conflict": 0,
+        "address": 0,
+        "without_suggestion": 0,
+    }
     try:
         rows = conn.execute(
             "SELECT match_status, COUNT(*) AS n FROM canonical_places "
@@ -592,6 +607,19 @@ def load_venue_match_counts(conn: sqlite3.Connection) -> dict:
     for row in rows:
         counts["all"] += int(row["n"])
         counts[row["match_status"]] = int(row["n"])
+    try:
+        extra = conn.execute(
+            "SELECT "
+            "SUM(CASE WHEN place_kind = 'address' THEN 1 ELSE 0 END) AS address, "
+            "SUM(CASE WHEN match_status != 'osm' AND has_osm_candidate = 0 "
+            "THEN 1 ELSE 0 END) AS without_suggestion "
+            "FROM canonical_places"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return counts
+    if extra is not None:
+        counts["address"] = int(extra["address"] or 0)
+        counts["without_suggestion"] = int(extra["without_suggestion"] or 0)
     return counts
 
 
@@ -702,7 +730,7 @@ VENUE_SELECT = (
     "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
     "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
     "p.sources_json, p.source_count, p.osm_type, p.osm_id, "
-    "p.match_status, "
+    "p.match_status, p.place_kind, p.has_osm_candidate, "
     "COUNT(v.id) AS visits_count, MIN(v.visited_at) AS first_visit, "
     "MAX(v.visited_at) AS last_visit, "
     "(SELECT COUNT(*) FROM photos ph JOIN visits pv ON pv.id = ph.visit_id "
@@ -1101,6 +1129,8 @@ def _format_venue(
         "osm_type": row["osm_type"],
         "osm_id": row["osm_id"],
         "match_status": row["match_status"],
+        "place_kind": row["place_kind"],
+        "has_osm_candidate": bool(row["has_osm_candidate"]),
         "osm_url": (
             f"https://www.openstreetmap.org/{row['osm_type']}/{row['osm_id']}"
             if row["osm_type"] and row["osm_id"] is not None
