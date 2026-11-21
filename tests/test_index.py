@@ -54,6 +54,24 @@ class FakeConnector(BaseConnector):
             "updated_at": "2026-11-20T00:00:00+00:00",
         }
 
+    def iter_records(self):
+        yield {
+            "source": "fake",
+            "record_id": "r1",
+            "kind": "survey_answer",
+            "source_place_id": "p1",
+            "created_at": 1700000000,
+            "payload": {"question": "Q", "answer": "A"},
+        }
+        yield {
+            "source": "fake",
+            "record_id": "r2",
+            "kind": "account",
+            "source_place_id": None,
+            "created_at": None,
+            "payload": {"Vorname": "Test"},
+        }
+
     def iter_visits(self):
         yield Visit(
             source="fake",
@@ -138,6 +156,10 @@ class IndexTest(unittest.TestCase):
                     "SELECT source, source_place_id, tel, categories_json "
                     "FROM place_details"
                 ).fetchall()
+                records = conn.execute(
+                    "SELECT source, record_id, kind, source_place_id, payload_json "
+                    "FROM source_records ORDER BY record_id"
+                ).fetchall()
             finally:
                 conn.close()
             self.assertEqual(visits, 2)
@@ -151,6 +173,14 @@ class IndexTest(unittest.TestCase):
             self.assertEqual(details[0][0], "fake")
             self.assertEqual(details[0][1], "p1")
             self.assertEqual(details[0][2], "089 123")
+            self.assertEqual(summary["records"], 2)
+            self.assertEqual(len(records), 2)
+            self.assertEqual(records[0][2], "survey_answer")
+            self.assertEqual(records[0][3], "p1")
+            self.assertEqual(json.loads(records[0][4])["answer"], "A")
+            self.assertEqual(records[1][2], "account")
+            self.assertIsNone(records[1][3])
+            self.assertEqual(json.loads(records[1][4]), {"Vorname": "Test"})
 
             payload = json.loads(Path(paths.map_geojson).read_text(encoding="utf-8"))
             self.assertEqual(payload["type"], "FeatureCollection")

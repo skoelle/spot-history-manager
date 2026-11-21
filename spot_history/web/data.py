@@ -595,10 +595,98 @@ def _details_for_links(conn: sqlite3.Connection, links: list[dict]) -> dict:
     return details
 
 
+VENUE_RECORD_KINDS = ("survey_answer", "business_interaction")
+
+ACTIVITY_ORDER = (
+    ("account", "Konto"),
+    ("compliment", "Komplimente"),
+    ("message", "Nachrichten"),
+    ("milestone", "Milestones"),
+    ("talk_topic", "Forum"),
+    ("profile_question", "Profilfrage"),
+    ("review_feedback", "Review-Feedback"),
+    ("photo_feedback", "Foto-Feedback"),
+    ("business_interaction", "Interaktionen"),
+)
+
+
+def _record_row(row: sqlite3.Row) -> dict:
+    created_at = row["created_at"]
+    return {
+        "id": row["record_id"],
+        "source": row["source"],
+        "kind": row["kind"],
+        "source_place_id": row["source_place_id"],
+        "created_at": created_at,
+        "date": (
+            datetime.fromtimestamp(int(created_at), timezone.utc).strftime("%d.%m.%Y")
+            if created_at
+            else None
+        ),
+        "payload": _parse_json(row["payload_json"]) or {},
+    }
+
+
+def records_for_links(
+    conn: sqlite3.Connection,
+    links: list[dict],
+    kinds: tuple[str, ...] | None = None,
+) -> dict[str, list[dict]]:
+    pairs = [
+        (link["source"], link["source_place_id"])
+        for link in links
+        if link.get("source") and link.get("source_place_id")
+    ]
+    if not pairs:
+        return {}
+    place_clause = " OR ".join("(source = ? AND source_place_id = ?)" for _ in pairs)
+    params: list = [value for pair in pairs for value in pair]
+    sql = (
+        "SELECT source, record_id, kind, source_place_id, created_at, payload_json "
+        f"FROM source_records WHERE ({place_clause})"
+    )
+    if kinds:
+        sql += f" AND kind IN ({', '.join('?' for _ in kinds)})"
+        params.extend(kinds)
+    sql += " ORDER BY created_at DESC, record_id"
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["kind"], []).append(_record_row(row))
+    return grouped
+
+
+def load_activity(conn: sqlite3.Connection, source: str = "yelp") -> list[dict]:
+    kinds = tuple(kind for kind, _ in ACTIVITY_ORDER)
+    params: list = [source, *kinds]
+    sql = (
+        "SELECT source, record_id, kind, source_place_id, created_at, payload_json "
+        "FROM source_records WHERE source = ? "
+        f"AND kind IN ({', '.join('?' for _ in kinds)}) "
+        "ORDER BY created_at DESC, record_id"
+    )
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["kind"], []).append(_record_row(row))
+    return [
+        {"kind": kind, "label": label, "records": grouped.get(kind, [])}
+        for kind, label in ACTIVITY_ORDER
+        if grouped.get(kind)
+    ]
+
+
 def _format_venue(
     row: sqlite3.Row,
     links: list[dict] | None = None,
     details: dict | None = None,
+    records: dict[str, list[dict]] | None = None,
 ) -> dict:
     first_visit = row["first_visit"]
     last_visit = row["last_visit"]
@@ -664,6 +752,7 @@ def _format_venue(
         ),
         "foursquare_url": foursquare_url,
         "details": details or {},
+        "records": records or {},
     }
 
 
@@ -688,7 +777,8 @@ def get_venue(conn: sqlite3.Connection, place_id: int) -> dict | None:
         return None
     venue_links = _links_for_places(conn, [place_id]).get(place_id, [])
     details = _details_for_links(conn, venue_links)
-    return _format_venue(row, venue_links, details)
+    records = records_for_links(conn, venue_links, VENUE_RECORD_KINDS)
+    return _format_venue(row, venue_links, details, records)
 
 
 def _venue_id_for_key(conn: sqlite3.Connection, key: str) -> int | None:

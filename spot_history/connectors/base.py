@@ -50,3 +50,11 @@ class BaseConnector:
 
     def iter_visits(self) -> Iterable[Visit]:
         return []
+
+    def iter_records(self) -> Iterable[dict[str, Any]]:
+        """Optional: detail or activity records for the index/web UI.
+
+        Each record may contain ``source``, ``record_id``, ``kind``,
+        ``source_place_id``, ``created_at`` and ``payload``.
+        """
+        return []

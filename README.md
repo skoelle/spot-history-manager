@@ -107,11 +107,16 @@ Quellen. Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl,
 ersten und letzten Besuch, Fotoanzahl, Fotogalerie, die Besuchshistorie und
 alle vorhandenen Quell-Links (Foursquare und/oder Yelp).
 
-Die Navigation führt zu **Check-ins**, **Orten** und **Fotos**. Die Fotoseite
-`/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle, Suche) und
-Pagination; Klick öffnet eine Lightbox mit dem Original. Check-in-Karten zeigen
-bis zu drei Vorschaubilder, Venue-Detailseiten eine Galerie. Yelp-Videos werden
-als eigener Video-Eintrag dargestellt.
+Die Navigation führt zu **Check-ins**, **Orten**, **Fotos** und **Yelp**.
+Die Fotoseite `/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle,
+Suche) und Pagination; Klick öffnet eine Lightbox mit dem Original.
+Check-in-Karten zeigen bis zu drei Vorschaubilder, Venue-Detailseiten eine
+Galerie. Yelp-Videos werden als eigener Video-Eintrag dargestellt.
+Venue-Detailseiten zeigen zusätzlich Yelp-Survey-Antworten und passende
+Business-Interaktionen. Die Seite `/aktivitaet` bündelt Komplimente,
+Nachrichten, Milestones, Forumsbeiträge, Review-/Foto-Feedback und
+Interaktionen. Sensible Felder (E-Mail, Telefon, IP-Adressen, Logins,
+gemeldete Inhalte) werden importiert, aber nicht im Web angezeigt.
 
 Der Karten-Popup zeigt Quelle, Kategorie, Adresse/Stadt und einen direkten Link
 zum Ort (`/venues/{key}`), nicht mehr den Foursquare-Original-Link.
@@ -149,6 +154,8 @@ gedacht.
 - `canonical_aliases` – frühere Keys für Redirects auf den aktuellen Key
 - `place_links` – Quell-Identitäten und Links je kanonischem Ort
 - `merge_candidates` – nicht automatisch angewandte Merge-Vorschläge
+- `source_records` – Detail- und Aktivitätsdaten je Quelle (Yelp-Surveys,
+  Interaktionen, Komplimente, Nachrichten, Feedback u. a.)
 - `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
   (`place_id` = Quell-Ort, `canonical_place_id` = kanonischer Ort)
 - `photos` – Fotometadaten + lokaler Pfad
@@ -316,6 +323,12 @@ python3 -m spot_history yelp stats
 ```
 
 - 462 Check-ins, 284 Orte, 92 mit Quellkoordinaten, 270 Medien
+- Zusätzlich importiert: 39 Survey-Antworten, 45 Business-Interaktionen,
+  36 Review-Feedback, 8 Foto-Feedback, 143 Komplimente, 25 Nachrichten,
+  3 Milestones, 2 Forumsbeiträge, 1 Profilfrage und die Kontodaten
+  (10 Felder; sensible Felder werden nicht im Web angezeigt)
+- 17 Quelltabellen ohne Daten (u. a. Reservierungen, Wartelisten, Tips) werden
+  mit Headern und Zeilenzahl in `source_tables` dokumentiert
 - 16 Yelp-Orte haben aus Lesezeichen/Sammlungen eine Business-URL; sie wird
   beim Import in `places.place_url` gespeichert und als Quell-Link in den Index
   übernommen

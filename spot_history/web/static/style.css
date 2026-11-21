@@ -948,3 +948,110 @@ button:hover,
     border-bottom: none;
     padding: 0.25rem 0;
 }
+
+.yelp-details {
+    margin-bottom: 1.5rem;
+}
+
+.detail-section + .detail-section {
+    margin-top: 1.25rem;
+}
+
+.detail-heading {
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted, #6b7280);
+    margin-bottom: 0.5rem;
+}
+
+.record-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.record-item {
+    padding: 0.65rem 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.record-item:last-child {
+    border-bottom: none;
+}
+
+.record-main {
+    font-weight: 600;
+}
+
+.record-text {
+    margin-top: 0.25rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.record-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--muted, #6b7280);
+}
+
+.record-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.activity-group {
+    margin-bottom: 1.5rem;
+}
+
+.activity-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 0;
+}
+
+.activity-summary::-webkit-details-marker {
+    display: none;
+}
+
+.activity-summary::marker {
+    content: "";
+}
+
+.activity-summary::after {
+    content: "▸";
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.activity-group[open] .activity-summary {
+    margin-bottom: 0.75rem;
+}
+
+.activity-group[open] .activity-summary::after {
+    content: "▾";
+}
+
+.activity-count {
+    margin-left: auto;
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.activity-group .record-text {
+    max-height: 12rem;
+    overflow-y: auto;
+}

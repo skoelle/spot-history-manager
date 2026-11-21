@@ -76,6 +76,16 @@ class YelpConnector(BaseConnector):
         print(f"Freunde:          {summary.counts.get('friends', 0)}")
         print(f"Reactions:        {summary.counts.get('reactions', 0)}")
         print(f"Suchen:           {summary.counts.get('searches', 0)}")
+        print(f"Survey-Antworten: {summary.counts.get('survey_answers', 0)}")
+        print(f"Interaktionen:    {summary.counts.get('business_interactions', 0)}")
+        print(f"Review-Feedback:  {summary.counts.get('review_feedback', 0)}")
+        print(f"Foto-Feedback:    {summary.counts.get('photo_feedback', 0)}")
+        print(f"Komplimente:      {summary.counts.get('compliments', 0)}")
+        print(f"Nachrichten:      {summary.counts.get('messages', 0)}")
+        print(f"Milestones:       {summary.counts.get('milestones', 0)}")
+        print(f"Forum/Profil:     {summary.counts.get('talk_topics', 0)} / "
+              f"{summary.counts.get('profile_questions', 0)}")
+        print(f"Quelltabellen:    {summary.counts.get('source_tables', 0)}")
         print(f"Fotos/Medien:     {summary.counts.get('photos', 0)} "
               f"({summary.linked_photos} verknüpft)")
         print(f"Medien kopiert:   {summary.media_copied} "
@@ -158,6 +168,15 @@ class YelpConnector(BaseConnector):
         print(f"Freunde:          {stats['friends']}")
         print(f"Reactions:        {stats['reactions']}")
         print(f"Suchen:           {stats['searches']}")
+        print(f"Survey-Antworten: {stats['survey_answers']}")
+        print(f"Interaktionen:    {stats['business_interactions']}")
+        print(f"Review-Feedback:  {stats['review_feedback']}")
+        print(f"Foto-Feedback:    {stats['photo_feedback']}")
+        print(f"Komplimente:      {stats['compliments']}")
+        print(f"Nachrichten:      {stats['messages']}")
+        print(f"Milestones:       {stats['milestones']}")
+        print(f"Forum/Profil:     {stats['talk_topics']} / {stats['profile_questions']}")
+        print(f"Quelltabellen:    {stats['source_tables']}")
         print(f"Fotos/Medien:     {stats['photos']} ({stats['linked_photos']} verknüpft)")
         media_dir = Path(config.media_dir)
         if media_dir.exists():
@@ -170,6 +189,181 @@ class YelpConnector(BaseConnector):
             if not run.get("ok"):
                 print(f"Importfehler:     {run.get('error') or '-'}")
         return 0
+
+    ACCOUNT_FIELDS = ("Vorname", "Nachname", "Geburtstag", "Geschlecht")
+
+    def iter_records(self):
+        config = build_config(copy_media=False)
+        db_path = Path(config.db_path)
+        if not db_path.exists():
+            return
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            queries = (
+                (
+                    "survey_answer",
+                    "SELECT id, answered_at, place_key, place_name, question, "
+                    "answer, device_type FROM survey_answers",
+                    lambda row: (
+                        row["place_key"],
+                        row["answered_at"],
+                        {
+                            "place_name": row["place_name"],
+                            "question": row["question"],
+                            "answer": row["answer"],
+                            "device_type": row["device_type"],
+                        },
+                    ),
+                ),
+                (
+                    "business_interaction",
+                    "SELECT id, created_at, place_key, place_name, interaction "
+                    "FROM business_interactions",
+                    lambda row: (
+                        row["place_key"],
+                        row["created_at"],
+                        {
+                            "place_name": row["place_name"],
+                            "interaction": row["interaction"],
+                        },
+                    ),
+                ),
+                (
+                    "review_feedback",
+                    "SELECT id, created_at, content_url, business_ref, helpful, "
+                    "funny, cool FROM review_feedback",
+                    lambda row: (
+                        None,
+                        row["created_at"],
+                        {
+                            "content_url": row["content_url"],
+                            "business_ref": row["business_ref"],
+                            "helpful": row["helpful"],
+                            "funny": row["funny"],
+                            "cool": row["cool"],
+                        },
+                    ),
+                ),
+                (
+                    "photo_feedback",
+                    "SELECT id, updated_at, photo_url, liked, useful FROM photo_feedback",
+                    lambda row: (
+                        None,
+                        row["updated_at"],
+                        {
+                            "photo_url": row["photo_url"],
+                            "liked": row["liked"],
+                            "useful": row["useful"],
+                        },
+                    ),
+                ),
+                (
+                    "compliment",
+                    "SELECT id, created_at, direction, name, content_type, "
+                    "compliment_type, message, status FROM compliments",
+                    lambda row: (
+                        None,
+                        row["created_at"],
+                        {
+                            "direction": row["direction"],
+                            "name": row["name"],
+                            "content_type": row["content_type"],
+                            "compliment_type": row["compliment_type"],
+                            "message": row["message"],
+                            "status": row["status"],
+                        },
+                    ),
+                ),
+                (
+                    "message",
+                    "SELECT id, created_at, recipient, subject, place_key, "
+                    "place_name, text, status, read_at FROM messages",
+                    lambda row: (
+                        row["place_key"],
+                        row["created_at"],
+                        {
+                            "recipient": row["recipient"],
+                            "subject": row["subject"],
+                            "place_name": row["place_name"],
+                            "text": row["text"],
+                            "status": row["status"],
+                            "read_at": row["read_at"],
+                        },
+                    ),
+                ),
+                (
+                    "milestone",
+                    "SELECT id, created_at, subject, text FROM milestones",
+                    lambda row: (
+                        None,
+                        row["created_at"],
+                        {"subject": row["subject"], "text": row["text"]},
+                    ),
+                ),
+                (
+                    "profile_question",
+                    "SELECT id, question, answer, status FROM profile_questions",
+                    lambda row: (
+                        None,
+                        None,
+                        {
+                            "question": row["question"],
+                            "answer": row["answer"],
+                            "status": row["status"],
+                        },
+                    ),
+                ),
+                (
+                    "talk_topic",
+                    "SELECT id, created_at, topic, comment, status FROM talk_topics",
+                    lambda row: (
+                        None,
+                        row["created_at"],
+                        {
+                            "topic": row["topic"],
+                            "comment": row["comment"],
+                            "status": row["status"],
+                        },
+                    ),
+                ),
+            )
+            for kind, sql, mapper in queries:
+                try:
+                    rows = conn.execute(sql).fetchall()
+                except sqlite3.OperationalError:
+                    continue
+                for row in rows:
+                    place_id, created_at, payload = mapper(row)
+                    yield {
+                        "source": SOURCE,
+                        "record_id": row["id"],
+                        "kind": kind,
+                        "source_place_id": place_id,
+                        "created_at": created_at,
+                        "payload": payload,
+                    }
+            try:
+                account = {
+                    row["field"]: row["value"]
+                    for row in conn.execute(
+                        "SELECT field, value FROM account_information"
+                    )
+                    if row["field"] in self.ACCOUNT_FIELDS and row["value"]
+                }
+            except sqlite3.OperationalError:
+                account = {}
+            if account:
+                yield {
+                    "source": SOURCE,
+                    "record_id": "account",
+                    "kind": "account",
+                    "source_place_id": None,
+                    "created_at": None,
+                    "payload": account,
+                }
+        finally:
+            conn.close()
 
     def iter_visits(self):
         config = build_config(copy_media=False)

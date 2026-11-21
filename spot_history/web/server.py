@@ -561,6 +561,44 @@ async def clear_venue_osm(request: Request, key: str) -> RedirectResponse:
     return _redirect_venue(updated["key"], assign_ok=message)
 
 
+@app.get("/aktivitaet", response_class=HTMLResponse)
+def activity(request: Request) -> HTMLResponse:
+    index_db = paths.index_db
+    if not index_db.exists():
+        return templates.TemplateResponse(
+            request,
+            "activity.html",
+            {
+                "request": request,
+                "index_missing": True,
+                "index_path": str(index_db),
+                "groups": [],
+                "profile": None,
+            },
+        )
+    conn = web_data.connect(index_db)
+    try:
+        profiles = web_data.load_profiles(conn)
+        profile = next(
+            (item for item in profiles if item["source"] == "foursquare"),
+            profiles[0] if profiles else None,
+        )
+        groups = web_data.load_activity(conn)
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "activity.html",
+        {
+            "request": request,
+            "index_missing": False,
+            "index_path": str(index_db),
+            "groups": groups,
+            "profile": profile,
+        },
+    )
+
+
 @app.get("/media/{path:path}")
 def media(path: str) -> FileResponse:
     data_root = paths.data_root.resolve()

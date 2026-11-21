@@ -193,6 +193,161 @@ CREATE TABLE IF NOT EXISTS photos (
 CREATE INDEX IF NOT EXISTS idx_yelp_photos_checkin ON photos(checkin_id);
 CREATE INDEX IF NOT EXISTS idx_yelp_photos_place ON photos(place_key);
 
+CREATE TABLE IF NOT EXISTS survey_answers (
+    id TEXT PRIMARY KEY,
+    answered_at INTEGER,
+    answered_at_iso TEXT,
+    place_name TEXT NOT NULL,
+    place_key TEXT NOT NULL,
+    question TEXT,
+    answer TEXT,
+    device_type TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_yelp_survey_place ON survey_answers(place_key);
+
+CREATE TABLE IF NOT EXISTS business_interactions (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    place_name TEXT NOT NULL,
+    place_key TEXT,
+    interaction TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_yelp_interactions_place ON business_interactions(place_key);
+
+CREATE TABLE IF NOT EXISTS review_feedback (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    updated_at_iso TEXT,
+    content_url TEXT,
+    business_ref TEXT,
+    helpful TEXT,
+    funny TEXT,
+    cool TEXT,
+    ip TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS photo_feedback (
+    id TEXT PRIMARY KEY,
+    updated_at INTEGER,
+    updated_at_iso TEXT,
+    photo_url TEXT,
+    liked TEXT,
+    useful TEXT,
+    ip TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS compliments (
+    id TEXT PRIMARY KEY,
+    direction TEXT NOT NULL,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    name TEXT,
+    content_type TEXT,
+    compliment_type TEXT,
+    message TEXT,
+    status TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_yelp_compliments_direction ON compliments(direction);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    recipient TEXT,
+    subject TEXT,
+    place_name TEXT,
+    place_key TEXT,
+    text TEXT,
+    status TEXT,
+    read_at TEXT,
+    media TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS milestones (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    subject TEXT,
+    text TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS profile_questions (
+    id TEXT PRIMARY KEY,
+    question TEXT,
+    answer TEXT,
+    status TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS talk_topics (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    topic TEXT,
+    comment TEXT,
+    status TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS account_information (
+    id TEXT PRIMARY KEY,
+    field TEXT NOT NULL,
+    value TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_logins (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS flagged_content (
+    id TEXT PRIMARY KEY,
+    content_type TEXT,
+    created_at INTEGER,
+    created_at_iso TEXT,
+    reason TEXT,
+    note TEXT,
+    ip TEXT,
+    raw_row TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_tables (
+    table_name TEXT PRIMARY KEY,
+    headers_json TEXT,
+    rows_json TEXT,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    imported_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS import_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
@@ -214,6 +369,19 @@ CREATE TABLE IF NOT EXISTS import_runs (
     media_skipped INTEGER NOT NULL DEFAULT 0,
     linked_photos INTEGER NOT NULL DEFAULT 0,
     linked_comments INTEGER NOT NULL DEFAULT 0,
+    survey_answers INTEGER NOT NULL DEFAULT 0,
+    business_interactions INTEGER NOT NULL DEFAULT 0,
+    review_feedback INTEGER NOT NULL DEFAULT 0,
+    photo_feedback INTEGER NOT NULL DEFAULT 0,
+    compliments INTEGER NOT NULL DEFAULT 0,
+    messages INTEGER NOT NULL DEFAULT 0,
+    milestones INTEGER NOT NULL DEFAULT 0,
+    profile_questions INTEGER NOT NULL DEFAULT 0,
+    talk_topics INTEGER NOT NULL DEFAULT 0,
+    account_information INTEGER NOT NULL DEFAULT 0,
+    user_logins INTEGER NOT NULL DEFAULT 0,
+    flagged_content INTEGER NOT NULL DEFAULT 0,
+    source_tables INTEGER NOT NULL DEFAULT 0,
     ok INTEGER NOT NULL DEFAULT 1,
     error TEXT
 );
@@ -271,12 +439,71 @@ COLUMNS: dict[str, list[str]] = {
         "media_type", "filename", "local_path", "caption", "status", "checkin_id",
         "link_method", "raw_row", "imported_at",
     ],
+    "survey_answers": [
+        "id", "answered_at", "answered_at_iso", "place_name", "place_key",
+        "question", "answer", "device_type", "raw_row", "imported_at",
+    ],
+    "business_interactions": [
+        "id", "created_at", "created_at_iso", "place_name", "place_key",
+        "interaction", "raw_row", "imported_at",
+    ],
+    "review_feedback": [
+        "id", "created_at", "created_at_iso", "updated_at_iso", "content_url",
+        "business_ref", "helpful", "funny", "cool", "ip", "raw_row", "imported_at",
+    ],
+    "photo_feedback": [
+        "id", "updated_at", "updated_at_iso", "photo_url", "liked", "useful",
+        "ip", "raw_row", "imported_at",
+    ],
+    "compliments": [
+        "id", "direction", "created_at", "created_at_iso", "name", "content_type",
+        "compliment_type", "message", "status", "raw_row", "imported_at",
+    ],
+    "messages": [
+        "id", "created_at", "created_at_iso", "recipient", "subject", "place_name",
+        "place_key", "text", "status", "read_at", "media", "raw_row", "imported_at",
+    ],
+    "milestones": [
+        "id", "created_at", "created_at_iso", "subject", "text", "raw_row",
+        "imported_at",
+    ],
+    "profile_questions": [
+        "id", "question", "answer", "status", "raw_row", "imported_at",
+    ],
+    "talk_topics": [
+        "id", "created_at", "created_at_iso", "topic", "comment", "status",
+        "raw_row", "imported_at",
+    ],
+    "account_information": [
+        "id", "field", "value", "raw_row", "imported_at",
+    ],
+    "user_logins": [
+        "id", "created_at", "created_at_iso", "ip", "user_agent", "raw_row",
+        "imported_at",
+    ],
+    "flagged_content": [
+        "id", "content_type", "created_at", "created_at_iso", "reason", "note",
+        "ip", "raw_row", "imported_at",
+    ],
+    "source_tables": [
+        "table_name", "headers_json", "rows_json", "row_count", "imported_at",
+    ],
 }
 
 TABLES = [
     "checkins", "checkin_comments", "reviews", "bookmarks", "collections",
     "collection_items", "saved_locations", "friends", "reactions", "searches",
-    "photos",
+    "photos", "survey_answers", "business_interactions", "review_feedback",
+    "photo_feedback", "compliments", "messages", "milestones",
+    "profile_questions", "talk_topics", "account_information", "user_logins",
+    "flagged_content", "source_tables",
+]
+
+EXTRA_KEYS = [
+    "survey_answers", "business_interactions", "review_feedback",
+    "photo_feedback", "compliments", "messages", "milestones",
+    "profile_questions", "talk_topics", "account_information", "user_logins",
+    "flagged_content", "source_tables",
 ]
 
 
@@ -306,6 +533,14 @@ class Database:
         for column in ("city", "state", "country_code", "place_url"):
             if column not in columns:
                 self.conn.execute(f"ALTER TABLE places ADD COLUMN {column} TEXT")
+        run_columns = {
+            row["name"] for row in self.conn.execute("PRAGMA table_info(import_runs)")
+        }
+        for column in EXTRA_KEYS:
+            if column not in run_columns:
+                self.conn.execute(
+                    f"ALTER TABLE import_runs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                )
 
     def close(self) -> None:
         if self.conn is not None:
@@ -318,18 +553,20 @@ class Database:
     def __exit__(self, *_: Any) -> None:
         self.close()
 
-    def upsert(self, table: str, rows: Iterable[dict[str, Any]]) -> int:
+    def upsert(
+        self, table: str, rows: Iterable[dict[str, Any]], key: str = "id"
+    ) -> int:
         rows = list(rows)
         if not rows:
             return 0
         columns = COLUMNS[table]
         placeholders = ", ".join("?" for _ in columns)
         updates = ", ".join(
-            f"{column}=excluded.{column}" for column in columns if column != "id"
+            f"{column}=excluded.{column}" for column in columns if column != key
         )
         sql = (
             f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders}) "
-            f"ON CONFLICT(id) DO UPDATE SET {updates}"
+            f"ON CONFLICT({key}) DO UPDATE SET {updates}"
         )
         with self.conn:
             self.conn.executemany(
@@ -458,12 +695,14 @@ class Database:
     def finish_run(self, run_id: int, counts: dict[str, int], ok: bool = True,
                    error: str | None = None) -> None:
         with self.conn:
+            extra_columns = ", ".join(f"{key}=?" for key in EXTRA_KEYS)
             self.conn.execute(
                 "UPDATE import_runs SET finished_at=?, checkins=?, comments=?, "
                 "reviews=?, bookmarks=?, collections=?, collection_items=?, "
                 "saved_locations=?, friends=?, reactions=?, searches=?, photos=?, "
                 "media_copied=?, media_skipped=?, linked_photos=?, "
-                "linked_comments=?, ok=?, error=? WHERE id=?",
+                "linked_comments=?, "
+                f"{extra_columns}, ok=?, error=? WHERE id=?",
                 (
                     iso_now(),
                     counts.get("checkins", 0),
@@ -481,6 +720,7 @@ class Database:
                     counts.get("media_skipped", 0),
                     counts.get("linked_photos", 0),
                     counts.get("linked_comments", 0),
+                    *[counts.get(key, 0) for key in EXTRA_KEYS],
                     1 if ok else 0,
                     error,
                     run_id,

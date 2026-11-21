@@ -53,6 +53,37 @@ class FakeConnector(BaseConnector):
             "updated_at": "2026-11-20T00:00:00+00:00",
         }
 
+    def iter_records(self):
+        yield {
+            "source": "fake",
+            "record_id": "rec1",
+            "kind": "survey_answer",
+            "source_place_id": "p1",
+            "created_at": 1700000000,
+            "payload": {
+                "place_name": "Michaeligarten",
+                "question": "Gibt es Bier?",
+                "answer": "Ja",
+                "device_type": "iPhone",
+            },
+        }
+        yield {
+            "source": "fake",
+            "record_id": "rec2",
+            "kind": "message",
+            "source_place_id": None,
+            "created_at": 1600000000,
+            "payload": {"recipient": "Alex", "subject": "Hallo", "text": "Servus"},
+        }
+        yield {
+            "source": "fake",
+            "record_id": "rec3",
+            "kind": "account",
+            "source_place_id": None,
+            "created_at": None,
+            "payload": {"Vorname": "Test"},
+        }
+
     def iter_visits(self):
         yield Visit(
             source="fake",
@@ -220,6 +251,10 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(details["social"], {"instagram": "michi"})
         self.assertEqual(details["categories"], ["Beer Garden", "Restaurant"])
         self.assertEqual(details["date_refreshed"], "2026-11-20")
+        self.assertEqual(len(venue["records"]["survey_answer"]), 1)
+        self.assertEqual(venue["records"]["survey_answer"][0]["payload"]["answer"], "Ja")
+        self.assertNotIn("account", venue["records"])
+        self.assertNotIn("message", venue["records"])
         visits = web_data.query_visits(
             self.conn, web_data.Filters(place_id=venue["id"]), limit=10, offset=0
         )
@@ -399,6 +434,43 @@ class WebDataTest(unittest.TestCase):
         self.assertEqual(by_numeric["key"], key)
 
         self.assertIsNone(web_data.get_venue_by_key(self.conn, "osm-way-1"))
+
+    def test_activity_groups_records(self):
+        groups = web_data.load_activity(self.conn, source="fake")
+        labels = {group["kind"]: group["label"] for group in groups}
+        self.assertEqual(labels["account"], "Konto")
+        self.assertEqual(labels["message"], "Nachrichten")
+        account = next(group for group in groups if group["kind"] == "account")
+        self.assertEqual(account["records"][0]["payload"], {"Vorname": "Test"})
+        message = next(group for group in groups if group["kind"] == "message")
+        self.assertEqual(message["records"][0]["payload"]["text"], "Servus")
+        self.assertEqual(web_data.load_activity(self.conn, source="unknown"), [])
+
+    def test_merged_venue_aggregates_records_from_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {"fake": FakeConnector(), "other": OtherConnector()},
+                paths,
+                log=lambda _: None,
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                venue = web_data.query_venues(
+                    conn,
+                    web_data.VenueFilters(q="Michaeligarten"),
+                    limit=10,
+                    offset=0,
+                )[0]
+                detail = web_data.get_venue(conn, venue["id"])
+            finally:
+                conn.close()
+        self.assertEqual(len(detail["links"]), 2)
+        self.assertEqual(len(detail["records"]["survey_answer"]), 1)
+        self.assertEqual(
+            detail["records"]["survey_answer"][0]["payload"]["question"],
+            "Gibt es Bier?",
+        )
 
     def test_thumb_relpath_is_stable(self):
         first = thumb_relpath("foursquare", "abc")

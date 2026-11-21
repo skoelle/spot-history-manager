@@ -98,6 +98,46 @@
     {% endif %}
     </div>
 
+    {% set survey_answers = venue.records.get('survey_answer', []) %}
+    {% set interactions = venue.records.get('business_interaction', []) %}
+    {% if survey_answers or interactions %}
+    <div class="box yelp-details">
+        <div class="box-title">Yelp-Details</div>
+        {% if survey_answers %}
+        <div class="detail-section">
+            <div class="detail-heading">Fragen &amp; Antworten · {{ survey_answers|length }}</div>
+            <ul class="record-list">
+                {% for item in survey_answers %}
+                <li class="record-item">
+                    <div class="record-main">{{ item.payload.question }}</div>
+                    <div class="record-text">{{ item.payload.answer or '—' }}</div>
+                    <div class="record-meta">
+                        {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                        {% if item.payload.device_type %}<span>{{ item.payload.device_type }}</span>{% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        {% if interactions %}
+        <div class="detail-section">
+            <div class="detail-heading">Interaktionen · {{ interactions|length }}</div>
+            <ul class="record-list">
+                {% for item in interactions %}
+                <li class="record-item">
+                    <div class="record-main">{{ item.payload.interaction or 'Interaktion' }}</div>
+                    <div class="record-meta">
+                        {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if assign_error %}
     <div class="notice notice-error">{{ assign_error }}</div>
     {% endif %}

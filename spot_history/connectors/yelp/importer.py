@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,13 +11,32 @@ from urllib.parse import urlsplit
 from ...core.config import ROOT
 from .config import YelpConfig
 from .db import Database, iso_now
-from .html_tables import Cell, read_tables, select_table
+from .html_tables import Cell, Table, read_tables, select_table
 from .ids import normalize_name, parse_float, parse_iso8601, place_key, stable_id, visit_id
 
 CHECKIN_HEADERS = (
     "Datum", "Name des Unternehmens", "Kommentar", "Längengrad", "Breitengrad", "Status",
 )
 COMMENT_HEADERS = ("Datum", "Name des Unternehmens", "Kommentar", "Status")
+
+UNUSED_TABLES = (
+    "business_answer.html",
+    "business_question.html",
+    "cbil_linked_account.html",
+    "chat_storage.html",
+    "deal.html",
+    "device_visit_v2.html",
+    "gift_certificate.html",
+    "platform_order.html",
+    "reservation.html",
+    "review_draft.html",
+    "tip.html",
+    "user_business_follows.html",
+    "user_facts.html",
+    "user_preference.html",
+    "waitlist.html",
+    "year_on_yelp.html",
+)
 
 
 @dataclass
@@ -454,6 +474,455 @@ def _relative_to_root(path: Path) -> str:
         return str(path)
 
 
+def parse_survey_answers(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        "survey_answer.html",
+        ("Name des Unternehmens", "Frage", "Antwort", "Gerätetyp", "Beantwortet um"),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        name = _text(row, "Name des Unternehmens")
+        question = _text(row, "Frage")
+        answer = _text(row, "Antwort")
+        if not name or not question:
+            warnings.append("survey_answer.html: Zeile ohne Ort oder Frage übersprungen")
+            continue
+        parsed_date = _date(row, "Beantwortet um")
+        if parsed_date is not None:
+            answered_at, _, answered_at_iso = parsed_date
+        else:
+            answered_at, answered_at_iso = None, None
+        result.append(
+            {
+                "id": stable_id(
+                    "survey_answer", normalize_name(name), answered_at_iso,
+                    question, answer,
+                ),
+                "answered_at": answered_at,
+                "answered_at_iso": answered_at_iso,
+                "place_name": name,
+                "place_key": place_key(name),
+                "question": question or None,
+                "answer": answer or None,
+                "device_type": _text(row, "Gerätetyp") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_business_interactions(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        "user_business_interaction.html",
+        ("Datum", "Name des Unternehmens", "Art der Interaktion des Users mit dem Unternehmen"),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        name = _text(row, "Name des Unternehmens")
+        interaction = _text(row, "Art der Interaktion des Users mit dem Unternehmen")
+        parsed_date = _date(row)
+        if not name or parsed_date is None:
+            warnings.append(
+                "user_business_interaction.html: Zeile ohne Datum oder Namen übersprungen"
+            )
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        result.append(
+            {
+                "id": stable_id(
+                    "biz_interaction", normalize_name(name), iso_timestamp, interaction
+                ),
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "place_name": name,
+                "place_key": place_key(name),
+                "interaction": interaction or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_review_feedback(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        "review_feedback.html",
+        (
+            "Beitrags-URL", "Hilfreich", "Lustig", "Cool", "Erstellungsdatum",
+            "Aktualisierungsdatum", "IP Adresse",
+        ),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        content_url = _text(row, "Beitrags-URL")
+        parsed_date = _date(row, "Erstellungsdatum")
+        if not content_url or parsed_date is None:
+            warnings.append(
+                "review_feedback.html: Zeile ohne Datum oder Beitrags-URL übersprungen"
+            )
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        match = re.search(r"/biz/([^/?#]+)", content_url)
+        updated = _date(row, "Aktualisierungsdatum")
+        result.append(
+            {
+                "id": stable_id(
+                    "review_feedback", content_url, iso_timestamp,
+                    _text(row, "Hilfreich"), _text(row, "Lustig"), _text(row, "Cool"),
+                ),
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "updated_at_iso": updated[2] if updated else None,
+                "content_url": content_url,
+                "business_ref": match.group(1) if match else None,
+                "helpful": _text(row, "Hilfreich") or None,
+                "funny": _text(row, "Lustig") or None,
+                "cool": _text(row, "Cool") or None,
+                "ip": _text(row, "IP Adresse") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_photo_feedback(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        "biz_photo_feedback.html",
+        (
+            "Aktualisierungsdatum", "Foto-URL", 'Wurde mit "gefällt mir" markiert',
+            'Angaben zu "nützlich"', "IP Adresse",
+        ),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        photo_url = _text(row, "Foto-URL")
+        parsed_date = _date(row, "Aktualisierungsdatum")
+        if not photo_url or parsed_date is None:
+            warnings.append(
+                "biz_photo_feedback.html: Zeile ohne Datum oder Foto-URL übersprungen"
+            )
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        result.append(
+            {
+                "id": stable_id("photo_feedback", photo_url, iso_timestamp),
+                "updated_at": timestamp,
+                "updated_at_iso": iso_timestamp,
+                "photo_url": photo_url,
+                "liked": _text(row, 'Wurde mit "gefällt mir" markiert') or None,
+                "useful": _text(row, 'Angaben zu "nützlich"') or None,
+                "ip": _text(row, "IP Adresse") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_compliments(
+    html_dir: Path, filename: str, direction: str, warnings: list[str]
+) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        filename,
+        ("Datum", "Name", "Art des Inhalts", "Art des Kompliments", "Nachricht", "Status"),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        name = _text(row, "Name")
+        parsed_date = _date(row)
+        if not name or parsed_date is None:
+            warnings.append(f"{filename}: Zeile ohne Datum oder Namen übersprungen")
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        message = _text(row, "Nachricht")
+        compliment_type = _text(row, "Art des Kompliments")
+        result.append(
+            {
+                "id": stable_id(
+                    "compliment", direction, normalize_name(name), iso_timestamp,
+                    compliment_type, message,
+                ),
+                "direction": direction,
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "name": name,
+                "content_type": _text(row, "Art des Inhalts") or None,
+                "compliment_type": compliment_type or None,
+                "message": message or None,
+                "status": _text(row, "Status") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_messages(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        "message.html",
+        (
+            "Datum", "Medien", "Empfänger", "Betreff", "Name des Unternehmens",
+            "Text", "Status", "Is Read (At time of export)",
+        ),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        parsed_date = _date(row)
+        if parsed_date is None:
+            warnings.append("message.html: Zeile ohne Datum übersprungen")
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        recipient = _text(row, "Empfänger")
+        subject = _text(row, "Betreff")
+        text = _text(row, "Text")
+        name = _text(row, "Name des Unternehmens")
+        result.append(
+            {
+                "id": stable_id("message", iso_timestamp, recipient, subject, text, name),
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "recipient": recipient or None,
+                "subject": subject or None,
+                "place_name": name or None,
+                "place_key": place_key(name) if name else None,
+                "text": text or None,
+                "status": _text(row, "Status") or None,
+                "read_at": _text(row, "Is Read (At time of export)") or None,
+                "media": _media_filename(row.get("Medien")),
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_milestones(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(html_dir, "milestone.html", ("Betreff", "Text", "Erstellungsdatum"), warnings)
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        subject = _text(row, "Betreff")
+        text = _text(row, "Text")
+        parsed_date = _date(row, "Erstellungsdatum")
+        if not subject or parsed_date is None:
+            warnings.append("milestone.html: Zeile ohne Datum oder Betreff übersprungen")
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        result.append(
+            {
+                "id": stable_id("milestone", iso_timestamp, subject, text),
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "subject": subject or None,
+                "text": text or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_profile_questions(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(html_dir, "profile_question.html", ("Frage", "Antwort", "Status"), warnings)
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        question = _text(row, "Frage")
+        if not question:
+            warnings.append("profile_question.html: Zeile ohne Frage übersprungen")
+            continue
+        answer = _text(row, "Antwort")
+        result.append(
+            {
+                "id": stable_id("profile_question", question, answer),
+                "question": question,
+                "answer": answer or None,
+                "status": _text(row, "Status") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_talk_topics(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(html_dir, "talk_topic.html", ("Datum", "Thema", "Kommentar", "Status"), warnings)
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        topic = _text(row, "Thema")
+        parsed_date = _date(row)
+        if not topic or parsed_date is None:
+            warnings.append("talk_topic.html: Zeile ohne Datum oder Thema übersprungen")
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        comment = _text(row, "Kommentar")
+        result.append(
+            {
+                "id": stable_id("talk_topic", iso_timestamp, topic, comment),
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "topic": topic,
+                "comment": comment or None,
+                "status": _text(row, "Status") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_account_information(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    path = html_dir / "account_information.html"
+    if not path.exists():
+        warnings.append("account_information.html: Datei fehlt")
+        return []
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for table in read_tables(path):
+        if table.headers:
+            continue
+        for row in table.rows:
+            if len(row) < 2:
+                continue
+            field = row[0].text
+            value = row[1].text
+            if not field:
+                continue
+            result.append(
+                {
+                    "id": stable_id("account", normalize_name(field)),
+                    "field": field,
+                    "value": value or None,
+                    "raw_row": json.dumps(
+                        {"field": field, "value": value},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    "imported_at": now,
+                }
+            )
+    return result
+
+
+def parse_user_logins(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir, "user_login.html", ("Datum", "IP Adresse", "User Agent"), warnings
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        parsed_date = _date(row)
+        if parsed_date is None:
+            warnings.append("user_login.html: Zeile ohne Datum übersprungen")
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        ip = _text(row, "IP Adresse")
+        user_agent = _text(row, "User Agent")
+        result.append(
+            {
+                "id": stable_id("login", iso_timestamp, ip, user_agent),
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "ip": ip or None,
+                "user_agent": user_agent or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def parse_flagged_content(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    rows = _rows(
+        html_dir,
+        "user_flagged_content.html",
+        ("Art des Inhalts", "Datum", "Grund", "Hinweis", "IP Adresse"),
+        warnings,
+    )
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        parsed_date = _date(row)
+        if parsed_date is None:
+            warnings.append("user_flagged_content.html: Zeile ohne Datum übersprungen")
+            continue
+        timestamp, _, iso_timestamp = parsed_date
+        content_type = _text(row, "Art des Inhalts")
+        note = _text(row, "Hinweis")
+        result.append(
+            {
+                "id": stable_id("flagged", iso_timestamp, content_type, note),
+                "content_type": content_type or None,
+                "created_at": timestamp,
+                "created_at_iso": iso_timestamp,
+                "reason": _text(row, "Grund") or None,
+                "note": note or None,
+                "ip": _text(row, "IP Adresse") or None,
+                "raw_row": _raw_row(row),
+                "imported_at": now,
+            }
+        )
+    return result
+
+
+def _table_rows(table: Table) -> list[Any]:
+    if table.headers:
+        return [
+            {
+                header: row[index].text if index < len(row) else ""
+                for index, header in enumerate(table.headers)
+            }
+            for row in table.rows
+        ]
+    return [[cell.text for cell in row] for row in table.rows]
+
+
+def capture_source_tables(html_dir: Path, warnings: list[str]) -> list[dict[str, Any]]:
+    now = iso_now()
+    result: list[dict[str, Any]] = []
+    for filename in UNUSED_TABLES:
+        path = html_dir / filename
+        if not path.exists():
+            continue
+        tables = read_tables(path)
+        if not tables:
+            warnings.append(f"{filename}: keine Tabelle gefunden")
+            continue
+        for index, table in enumerate(tables, start=1):
+            key = filename if len(tables) == 1 else f"{filename}#{index}"
+            result.append(
+                {
+                    "table_name": key,
+                    "headers_json": json.dumps(table.headers, ensure_ascii=False),
+                    "rows_json": json.dumps(_table_rows(table), ensure_ascii=False),
+                    "row_count": len(table.rows),
+                    "imported_at": now,
+                }
+            )
+    return result
+
+
 def parse_photos(
     html_dir: Path,
     config: YelpConfig,
@@ -569,6 +1038,24 @@ def run_import(config: YelpConfig, log: Callable[[str], None] = print) -> Import
     friends = parse_friends(config.html_dir, warnings)
     reactions = parse_reactions(config.html_dir, warnings)
     searches = parse_searches(config.html_dir, warnings)
+    survey_answers = parse_survey_answers(config.html_dir, warnings)
+    business_interactions = parse_business_interactions(config.html_dir, warnings)
+    review_feedback = parse_review_feedback(config.html_dir, warnings)
+    photo_feedback = parse_photo_feedback(config.html_dir, warnings)
+    compliments = (
+        parse_compliments(config.html_dir, "compliment.html", "sent", warnings)
+        + parse_compliments(
+            config.html_dir, "compliment_received.html", "received", warnings
+        )
+    )
+    messages = parse_messages(config.html_dir, warnings)
+    milestones = parse_milestones(config.html_dir, warnings)
+    profile_questions = parse_profile_questions(config.html_dir, warnings)
+    talk_topics = parse_talk_topics(config.html_dir, warnings)
+    account_information = parse_account_information(config.html_dir, warnings)
+    user_logins = parse_user_logins(config.html_dir, warnings)
+    flagged_content = parse_flagged_content(config.html_dir, warnings)
+    source_tables = capture_source_tables(config.html_dir, warnings)
 
     copied, skipped = copy_media(config, log)
     photos, linked_photos = parse_photos(
@@ -586,6 +1073,19 @@ def run_import(config: YelpConfig, log: Callable[[str], None] = print) -> Import
         "friends": len(friends),
         "reactions": len(reactions),
         "searches": len(searches),
+        "survey_answers": len(survey_answers),
+        "business_interactions": len(business_interactions),
+        "review_feedback": len(review_feedback),
+        "photo_feedback": len(photo_feedback),
+        "compliments": len(compliments),
+        "messages": len(messages),
+        "milestones": len(milestones),
+        "profile_questions": len(profile_questions),
+        "talk_topics": len(talk_topics),
+        "account_information": len(account_information),
+        "user_logins": len(user_logins),
+        "flagged_content": len(flagged_content),
+        "source_tables": len(source_tables),
         "photos": len(photos),
         "media_copied": copied,
         "media_skipped": skipped,
@@ -606,6 +1106,19 @@ def run_import(config: YelpConfig, log: Callable[[str], None] = print) -> Import
         db.upsert("friends", friends)
         db.upsert("reactions", reactions)
         db.upsert("searches", searches)
+        db.upsert("survey_answers", survey_answers)
+        db.upsert("business_interactions", business_interactions)
+        db.upsert("review_feedback", review_feedback)
+        db.upsert("photo_feedback", photo_feedback)
+        db.upsert("compliments", compliments)
+        db.upsert("messages", messages)
+        db.upsert("milestones", milestones)
+        db.upsert("profile_questions", profile_questions)
+        db.upsert("talk_topics", talk_topics)
+        db.upsert("account_information", account_information)
+        db.upsert("user_logins", user_logins)
+        db.upsert("flagged_content", flagged_content)
+        db.upsert("source_tables", source_tables, key="table_name")
         db.upsert("photos", photos)
         db.rebuild_places()
         db.set_meta("last_import_at", iso_now())

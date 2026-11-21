@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Yelp – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set active_page = 'activity' %}
+{% set header_meta %}Yelp{% endset %}
+<div class="container">
+    {% include "_header.html" %}
+
+    {% if index_missing %}
+    <div class="empty-state">
+        Der Index fehlt unter <code>{{ index_path }}</code>.<br>
+        Bitte zuerst <code>python3 -m spot_history index build</code> ausführen.
+    </div>
+    {% else %}
+    <p class="hint">
+        Soziale und Meta-Daten aus dem Yelp-Export. E-Mail, Telefon, IP-Adressen,
+        Logins und gemeldete Inhalte werden bewusst nicht angezeigt.
+    </p>
+
+    {% for group in groups %}
+    <details class="box activity-group"{% if loop.first %} open{% endif %}>
+        <summary class="box-title activity-summary">
+            <span>{{ group.label }}</span>
+            <span class="activity-count">{{ group.records|length }}</span>
+        </summary>
+        <ul class="record-list">
+            {% for item in group.records %}
+            <li class="record-item">
+                {% if group.kind == 'account' %}
+                <div class="record-facts">
+                    {% for key, value in item.payload.items() %}
+                    <span><strong>{{ key }}:</strong> {{ value }}</span>
+                    {% endfor %}
+                </div>
+                {% elif group.kind == 'compliment' %}
+                <div class="record-main">
+                    {% if item.payload.direction == 'sent' %}Gesendet{% else %}Erhalten{% endif %}
+                    · {{ item.payload.name or 'Unbekannt' }}
+                    {% if item.payload.compliment_type %} · {{ item.payload.compliment_type }}{% endif %}
+                </div>
+                {% if item.payload.message %}<div class="record-text">{{ item.payload.message }}</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.content_type %}<span>{{ item.payload.content_type }}</span>{% endif %}
+                    {% if item.payload.status %}<span>{{ item.payload.status }}</span>{% endif %}
+                </div>
+                {% elif group.kind == 'message' %}
+                <div class="record-main">
+                    An {{ item.payload.recipient or 'Unbekannt' }}
+                    {% if item.payload.subject %} · {{ item.payload.subject }}{% endif %}
+                </div>
+                {% if item.payload.text %}<div class="record-text">{{ item.payload.text }}</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.place_name %}<span>{{ item.payload.place_name }}</span>{% endif %}
+                    {% if item.payload.read_at %}<span>Gelesen: {{ item.payload.read_at }}</span>{% endif %}
+                </div>
+                {% elif group.kind == 'milestone' %}
+                <div class="record-main">{{ item.payload.subject or 'Milestone' }}</div>
+                {% if item.payload.text %}<div class="record-text">{{ item.payload.text }}</div>{% endif %}
+                {% if item.date %}<div class="record-meta"><span>{{ item.date }}</span></div>{% endif %}
+                {% elif group.kind == 'talk_topic' %}
+                <div class="record-main">{{ item.payload.topic or 'Forumsbeitrag' }}</div>
+                {% if item.payload.comment %}<div class="record-text">{{ item.payload.comment }}</div>{% endif %}
+                <div class="record-meta">
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                    {% if item.payload.status %}<span>{{ item.payload.status }}</span>{% endif %}
+                </div>
+                {% elif group.kind == 'review_feedback' %}
+                <div class="record-main">
+                    {% if item.payload.content_url %}
+                    <a href="{{ item.payload.content_url }}" target="_blank" rel="noopener">Review</a>
+                    {% else %}Review-Feedback{% endif %}
+                </div>
+                <div class="record-meta">
+                    {% if item.payload.helpful %}<span>Hilfreich: {{ item.payload.helpful }}</span>{% endif %}
+                    {% if item.payload.funny %}<span>Lustig: {{ item.payload.funny }}</span>{% endif %}
+                    {% if item.payload.cool %}<span>Cool: {{ item.payload.cool }}</span>{% endif %}
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                </div>
+                {% elif group.kind == 'photo_feedback' %}
+                <div class="record-main">
+                    {% if item.payload.photo_url %}
+                    <a href="{{ item.payload.photo_url }}" target="_blank" rel="noopener">Foto</a>
+                    {% else %}Foto-Feedback{% endif %}
+                </div>
+                <div class="record-meta">
+                    {% if item.payload.liked %}<span>Gefällt mir: {{ item.payload.liked }}</span>{% endif %}
+                    {% if item.payload.useful %}<span>Nützlich: {{ item.payload.useful }}</span>{% endif %}
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                </div>
+                {% elif group.kind == 'business_interaction' %}
+                <div class="record-main">{{ item.payload.interaction or 'Interaktion' }}</div>
+                <div class="record-meta">
+                    {% if item.payload.place_name %}<span>{{ item.payload.place_name }}</span>{% endif %}
+                    {% if item.date %}<span>{{ item.date }}</span>{% endif %}
+                </div>
+                {% elif group.kind == 'profile_question' %}
+                <div class="record-main">{{ item.payload.question or 'Profilfrage' }}</div>
+                {% if item.payload.answer %}<div class="record-text">{{ item.payload.answer }}</div>{% endif %}
+                {% if item.payload.status %}<div class="record-meta"><span>{{ item.payload.status }}</span></div>{% endif %}
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% else %}
+    <div class="empty-state">Keine Yelp-Daten im Index.</div>
+    {% endfor %}
+    {% endif %}
+</div>
+</body>
+</html>

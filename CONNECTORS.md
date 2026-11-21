@@ -44,6 +44,7 @@ class BaseConnector:
     def add_parser(self, subparsers) -> None: ...
     def run(self, args) -> int: ...
     def iter_visits(self) -> Iterable[Visit]: ...
+    def iter_records(self) -> Iterable[dict]: ...  # optional
 ```
 
 - `add_parser`: hängt `python -m spot_history <name> <command>` in den CLI-Baum.
@@ -51,6 +52,11 @@ class BaseConnector:
 - `run`: führt Sync/Import/Export/Stats aus und gibt einen Exit-Code zurück.
 - `iter_visits`: liest die eigene DB **nur lesend** und liefert kanonische
   Visits für den Index. Ohne Daten eine leere Sequenz liefern (kein Fehler).
+- `iter_records` (optional): liefert Detail- oder Aktivitätsdaten für den Index
+  und die Web-UI. Jeder Record enthält `source`, `record_id`, `kind`, optional
+  `source_place_id` und `created_at` sowie ein JSON-fähiges `payload`.
+  Sensible Felder gehören nicht in diese Records, wenn sie nicht im Web
+  erscheinen sollen.
 
 ## Kanonisches Visit-Format
 
@@ -96,7 +102,7 @@ Ein Import darf wiederholbar sein: gleiche IDs per Upsert, keine Duplikate.
 
 `python3 -m spot_history index build`:
 
-1. ruft für jeden Connector `iter_visits()` auf,
+1. ruft für jeden Connector `iter_visits()` und optional `iter_records()` auf,
 2. bildet aus `source` + `source_place_id` quellenspezifische Orte,
 3. führt Orte konservativ über normalisierten Namen, Koordinaten (≤ 50 m) oder
    Name + eindeutige Stadt zusammen; manuelle Regeln aus
@@ -107,8 +113,9 @@ Ein Import darf wiederholbar sein: gleiche IDs per Upsert, keine Duplikate.
    `merge_candidates`, Visits mit `canonical_place_id`),
 6. schreibt `data/exports/visits.geojson` (Punkte mit `[lng, lat]`).
 
-Der Index enthält nur kanonische Felder. Rohdaten und Sonderfälle bleiben in der
-Quell-DB. Die Regel-DB ist persistent und gehört nicht in den wegwerfbaren
+Der Index enthält kanonische Felder sowie optionale Detail-Records
+(`source_records`) für die Web-UI. Rohdaten und sensible Sonderfälle bleiben in
+der Quell-DB. Die Regel-DB ist persistent und gehört nicht in den wegwerfbaren
 Index. Neue Connectoren brauchen keine Änderung am Index-Code, solange sie
 stabile `source_place_id` und – wenn vorhanden – `place_url` liefern.
 

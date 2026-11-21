@@ -217,6 +217,20 @@ CREATE TABLE photos (
 
 CREATE INDEX idx_photos_visit ON photos(visit_id);
 
+CREATE TABLE source_records (
+    source TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    source_place_id TEXT,
+    created_at INTEGER,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY(source, record_id)
+);
+
+CREATE INDEX idx_source_records_place
+    ON source_records(source, source_place_id, kind);
+CREATE INDEX idx_source_records_kind ON source_records(kind);
+
 CREATE TABLE index_meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -237,6 +251,7 @@ def build_index(
     conn = sqlite3_connect(tmp)
     total_visits = total_photos = feature_count = 0
     place_details_total = 0
+    records_total = 0
     loaded_sources: list[str] = []
     source_visits: dict[str, list] = {}
     source_counts: dict[str, int] = {}
@@ -337,6 +352,38 @@ def build_index(
                         ),
                     )
                     place_details_total += 1
+            iter_records = getattr(connector, "iter_records", None)
+            if callable(iter_records):
+                try:
+                    records = list(iter_records())
+                except Exception as exc:
+                    log(f"Index: {name}: Detaildaten übersprungen ({exc})")
+                    records = []
+                for record in records:
+                    record_id = record.get("record_id")
+                    kind = record.get("kind")
+                    if not record_id or not kind:
+                        continue
+                    payload = record.get("payload") or {}
+                    conn.execute(
+                        "INSERT INTO source_records (source, record_id, kind, "
+                        "source_place_id, created_at, payload_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(source, record_id) DO UPDATE SET "
+                        "kind=excluded.kind, "
+                        "source_place_id=excluded.source_place_id, "
+                        "created_at=excluded.created_at, "
+                        "payload_json=excluded.payload_json",
+                        (
+                            record.get("source") or name,
+                            record_id,
+                            kind,
+                            record.get("source_place_id"),
+                            record.get("created_at"),
+                            json.dumps(payload, ensure_ascii=False),
+                        ),
+                    )
+                    records_total += 1
             visits = list(connector.iter_visits())
             if not visits:
                 log(f"Index: {name}: keine Daten, übersprungen")
@@ -592,6 +639,7 @@ def build_index(
         "photos": total_photos,
         "features": feature_count,
         "place_details": place_details_total,
+        "records": records_total,
         "places": len(source_places),
         "canonical_places": len(canonical_places),
         "place_links": link_total,
@@ -611,6 +659,7 @@ def build_index(
     log(
         f"Index: {total_visits} Visits, {total_photos} Fotos, "
         f"{feature_count} Kartenpunkte, {place_details_total} Ortsdetails, "
+        f"{records_total} Detailrecords, "
         f"{len(source_places)} Quell-Orte -> {len(canonical_places)} kanonische Orte "
         f"({link_total} Links, {len(candidates)} Merge-Vorschläge, "
         f"{summary['matched_osm']} OSM / {summary['unmatched_local']} lokal) "

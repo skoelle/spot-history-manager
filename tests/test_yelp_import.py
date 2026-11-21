@@ -62,6 +62,19 @@ class YelpImportTest(unittest.TestCase):
                 "friends": 1,
                 "reactions": 1,
                 "searches": 1,
+                "survey_answers": 2,
+                "business_interactions": 2,
+                "review_feedback": 1,
+                "photo_feedback": 1,
+                "compliments": 2,
+                "messages": 1,
+                "milestones": 1,
+                "profile_questions": 1,
+                "talk_topics": 1,
+                "account_information": 5,
+                "user_logins": 1,
+                "flagged_content": 1,
+                "source_tables": 2,
                 "photos": 4,
                 "media_copied": 4,
                 "media_skipped": 0,
@@ -78,6 +91,34 @@ class YelpImportTest(unittest.TestCase):
         self.assertEqual(stats["places"], 3)
         self.assertEqual(stats["linked_photos"], 2)
         self.assertEqual(stats["linked_comments"], 1)
+        self.assertEqual(stats["survey_answers"], 2)
+        self.assertEqual(stats["business_interactions"], 2)
+        self.assertEqual(stats["compliments"], 2)
+        self.assertEqual(stats["account_information"], 5)
+        self.assertEqual(stats["source_tables"], 2)
+
+        db = Database(self.config.db_path).open()
+        try:
+            survey = db.conn.execute(
+                "SELECT place_key, question, answer FROM survey_answers "
+                "WHERE place_name=?",
+                ("Test Café",),
+            ).fetchone()
+            account = db.conn.execute(
+                "SELECT field, value FROM account_information WHERE field=?",
+                ("Vorname",),
+            ).fetchone()
+            tables = {
+                row["table_name"]: row["row_count"]
+                for row in db.conn.execute("SELECT table_name, row_count FROM source_tables")
+            }
+        finally:
+            db.close()
+        self.assertEqual(survey["place_key"], place_key("Test Café"))
+        self.assertEqual(survey["question"], "Ist das Ambiente hier romantisch?")
+        self.assertEqual(account["value"], "Stefan")
+        self.assertEqual(len(tables), 2)
+        self.assertTrue(all(count == 0 for count in tables.values()))
 
         for relative in MEDIA_FILES:
             self.assertTrue((self.config.media_dir / relative).exists())
