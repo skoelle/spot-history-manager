@@ -70,6 +70,12 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(commands[1][:2], ["osm", "deep-scan"])
         self.assertEqual(commands[-1], ["index", "build", "--data-root", "/data"])
 
+    def test_research_decisions_path(self):
+        self.assertEqual(
+            sync_jobs.research_decisions_path(Path("/data")),
+            Path("/data/exports/yelp-research-decisions.csv"),
+        )
+
     def test_apply_research_runs_backup_and_index(self):
         commands = sync_jobs.build_commands("yelp-apply-research", Path("/data"))
         self.assertEqual(commands[0], ["backup", "--keep-days", "3"])

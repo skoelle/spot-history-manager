@@ -81,6 +81,10 @@ def _index_command(data_root: Path) -> tuple[str, ...]:
     return ("index", "build", "--data-root", str(data_root))
 
 
+def research_decisions_path(data_root: Path) -> Path:
+    return Path(data_root) / "exports" / "yelp-research-decisions.csv"
+
+
 def build_commands(action: str, data_root: Path) -> list[list[str]]:
     data_root = Path(data_root)
     foursquare_dir = str(data_root / "foursquare")
@@ -158,7 +162,7 @@ def build_commands(action: str, data_root: Path) -> list[list[str]]:
             [
                 "places",
                 "apply-research",
-                str(Path(data_root) / "exports" / "yelp-research-decisions.csv"),
+                str(research_decisions_path(data_root)),
                 "--data-root",
                 str(data_root),
                 "--no-build",

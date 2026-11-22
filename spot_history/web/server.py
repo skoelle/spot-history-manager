@@ -951,28 +951,11 @@ async def sync_research(request: Request) -> HTMLResponse:
                 research_preview=summary,
                 research_message="Keine gültigen Aktionen in der Eingabe.",
             )
-        target = paths.data_root / "sync" / "research-decisions.csv"
+        target = sync_jobs.research_decisions_path(paths.data_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-        commands = [
-            ["backup", "--keep-days", "3"],
-            [
-                "places",
-                "apply-research",
-                str(target),
-                "--data-root",
-                str(paths.data_root),
-                "--no-build",
-            ],
-            ["index", "build", "--data-root", str(paths.data_root)],
-        ]
         try:
-            sync_runner.start_raw(
-                "Recherche-Entscheidungen anwenden",
-                commands,
-                paths.data_root,
-                action="research-apply",
-            )
+            sync_runner.start(paths.data_root, "yelp-apply-research")
         except sync_jobs.JobBusy as exc:
             return _render_sync(
                 request,
