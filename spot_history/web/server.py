@@ -18,6 +18,7 @@ from ..connectors import discover
 from ..connectors.osm import db as osm_db
 from ..core import identity
 from ..core import places as place_core
+from ..core import research as place_research
 from ..core.config import build_paths
 from ..core.index import build_index, index_schema_ok
 from . import data as web_data
@@ -910,17 +911,80 @@ def google_activity(request: Request) -> HTMLResponse:
     )
 
 
+def _render_sync(request: Request, **extra) -> HTMLResponse:
+    context = {
+        "request": request,
+        "groups": sync_jobs.action_groups(paths.data_root),
+        "runs": sync_status.source_runs(paths.db_root),
+        "data_root": str(paths.data_root),
+        "research_text": "",
+        "research_preview": None,
+        "research_message": None,
+        **extra,
+    }
+    return templates.TemplateResponse(request, "sync.html", context)
+
+
 @app.get("/sync", response_class=HTMLResponse)
 def sync_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _render_sync(request)
+
+
+@app.post("/sync/research", response_class=HTMLResponse)
+async def sync_research(request: Request) -> HTMLResponse:
+    _check_same_origin(request)
+    text = await _form_value(request, "decisions")
+    submit_action = (await _form_value(request, "submit_action") or "preview").lower()
+    summary = place_research.apply_research_text(paths, text, dry_run=True)
+    if submit_action == "apply":
+        if summary.errors:
+            return _render_sync(
+                request,
+                research_text=text,
+                research_preview=summary,
+                research_message="Bitte zuerst die Fehler beheben.",
+            )
+        if not summary.actions:
+            return _render_sync(
+                request,
+                research_text=text,
+                research_preview=summary,
+                research_message="Keine gültigen Aktionen in der Eingabe.",
+            )
+        target = paths.data_root / "sync" / "research-decisions.csv"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        commands = [
+            ["backup", "--keep-days", "3"],
+            [
+                "places",
+                "apply-research",
+                str(target),
+                "--data-root",
+                str(paths.data_root),
+                "--no-build",
+            ],
+            ["index", "build", "--data-root", str(paths.data_root)],
+        ]
+        try:
+            sync_runner.start_raw(
+                "Recherche-Entscheidungen anwenden",
+                commands,
+                paths.data_root,
+                action="research-apply",
+            )
+        except sync_jobs.JobBusy as exc:
+            return _render_sync(
+                request,
+                research_text=text,
+                research_preview=summary,
+                research_message=str(exc),
+            )
+        return RedirectResponse("/sync", status_code=303)
+    return _render_sync(
         request,
-        "sync.html",
-        {
-            "request": request,
-            "groups": sync_jobs.action_groups(paths.data_root),
-            "runs": sync_status.source_runs(paths.db_root),
-            "data_root": str(paths.data_root),
-        },
+        research_text=text,
+        research_preview=summary,
     )
 
 

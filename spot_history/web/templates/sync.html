@@ -49,6 +49,65 @@
         {% endfor %}
     </div>
 
+    <div class="box research-box">
+        <div class="box-title">Recherche-Entscheidungen einfügen</div>
+        <p class="sync-description">
+            CSV mit <code>ref,action,target,osm,state,lat,lng,confidence,note</code>
+            einfügen. „Prüfen“ validiert nur, „Anwenden“ erstellt ein Backup,
+            wendet die Entscheidungen an und baut den Index neu.
+        </p>
+        {% if research_message %}
+        <div class="notice notice-error">{{ research_message }}</div>
+        {% endif %}
+        <form class="research-form" method="post" action="/sync/research">
+            <textarea name="decisions" rows="10" spellcheck="false"
+                      placeholder="ref,action,target,osm,state,lat,lng,confidence,note&#10;yelp:...,assign,,node/123,,, ,high,Same-Day + OSM">{{ research_text }}</textarea>
+            <div class="research-actions">
+                <button type="submit" name="submit_action" value="preview">Prüfen</button>
+                <button type="submit" name="submit_action" value="apply" class="danger"
+                        onclick="return confirm('Entscheidungen wirklich anwenden? Es wird vorher ein Backup erstellt.');">
+                    Anwenden
+                </button>
+            </div>
+        </form>
+        {% if research_preview %}
+        <div class="research-preview">
+            <p>
+                <strong>{{ research_preview.applied }}</strong> gültige Aktionen,
+                <strong>{{ research_preview.skipped }}</strong> übersprungen,
+                <strong>{{ research_preview.errors|length }}</strong> Fehler.
+            </p>
+            {% if research_preview.errors %}
+            <ul class="research-errors">
+                {% for error in research_preview.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if research_preview.actions %}
+            <div class="research-table-wrap">
+                <table class="research-table">
+                    <thead>
+                        <tr><th>Zeile</th><th>Ref</th><th>Aktion</th><th>Ziel / OSM</th><th>Note</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for item in research_preview.actions %}
+                        <tr>
+                            <td>{{ item.line }}</td>
+                            <td><code>{{ item.ref }}</code></td>
+                            <td>{{ item.action }}</td>
+                            <td>{{ item.target or item.osm or item.state or (item.lat ~ ', ' ~ item.lng if item.lat is not none else '') }}</td>
+                            <td>{{ item.note or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
     <div class="box sync-status"
          id="sync-status"
          data-status-url="/api/sync/status"

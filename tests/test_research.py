@@ -101,6 +101,23 @@ class ResearchTest(unittest.TestCase):
             self.assertEqual(row["suggested_action"], "merge")
             self.assertEqual(row["suggested_target"], "foursquare:f1")
 
+    def test_apply_research_text_preview(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._build(tmp, {"yelp": YelpConnector()})
+            text = (
+                "ref,action,target,osm,state,lat,lng,confidence,note\n"
+                "yelp:y1,assign,,node/123,,, ,high,verified\n"
+                "yelp:y1,coords,,,,,,,\n"
+                "yelp:y1,state,,,unknown,,,,\n"
+            )
+            preview = research.apply_research_text(paths, text, dry_run=True)
+            self.assertEqual(preview.applied, 1)
+            self.assertEqual(len(preview.actions), 1)
+            self.assertEqual(len(preview.errors), 2)
+            self.assertEqual(
+                identity.load_osm_assignments(paths.place_identity_db), {}
+            )
+
     def test_write_and_apply_research(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = self._build(tmp, {"yelp": YelpConnector()})

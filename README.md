@@ -188,6 +188,11 @@ Additional maintenance actions are available on the Sync page:
 The deep scan and research import run a backup first and rebuild the index
 afterwards.
 
+The Sync page also has a paste form for reviewed research decisions. Paste CSV
+rows with `ref,action,target,osm,state,lat,lng,confidence,note`, click
+"Prüfen" to validate without writing, then "Anwenden" to back up the databases,
+apply the decisions and rebuild the index.
+
 ### 🧰 One-off commands and updates in the container
 
 Run one-off jobs with the same image and mounts:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import sqlite3
 from collections import Counter, defaultdict
@@ -71,6 +72,7 @@ class ApplySummary:
     applied: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+    actions: list[dict] = field(default_factory=list)
 
 
 def _iso(timestamp: int | None) -> str | None:
@@ -443,85 +445,128 @@ def write_worklist_csv(rows: list[dict], path: Path) -> None:
             writer.writerow({field: row.get(field) for field in WORKLIST_FIELDS})
 
 
+def _apply_rows(
+    paths: Paths,
+    reader: csv.DictReader,
+    *,
+    dry_run: bool,
+) -> ApplySummary:
+    summary = ApplySummary()
+    for line, row in enumerate(reader, start=2):
+        ref = (row.get("ref") or "").strip()
+        action = (row.get("action") or "").strip().lower()
+        if not ref or not action or action in ("noop", "skip"):
+            summary.skipped += 1
+            continue
+        try:
+            source, source_place_id = parse_place_ref(ref)
+            target = None
+            osm = None
+            state = None
+            lat = None
+            lng = None
+            if action == "assign":
+                osm_type, osm_id = identity.parse_osm_ref(
+                    (row.get("osm") or "").strip()
+                )
+                osm = f"{osm_type}/{osm_id}"
+                if not dry_run:
+                    identity.upsert_osm_assignment(
+                        paths.place_identity_db,
+                        source,
+                        source_place_id,
+                        osm_type,
+                        osm_id,
+                        method="manual",
+                        confidence=(row.get("confidence") or "manual").strip(),
+                        note=(row.get("note") or "research").strip(),
+                    )
+                    identity.clear_osm_candidates(
+                        paths.place_identity_db, source, source_place_id
+                    )
+            elif action == "merge":
+                target_source, target_id = parse_place_ref(
+                    (row.get("target") or "").strip()
+                )
+                target = f"{target_source}:{target_id}"
+                if not dry_run:
+                    upsert_rule(
+                        paths.place_rules_db,
+                        PlaceRule(
+                            source=source,
+                            source_place_id=source_place_id,
+                            action="merge",
+                            target_source=target_source,
+                            target_source_place_id=target_id,
+                            note=(row.get("note") or "research").strip(),
+                        ),
+                    )
+            elif action == "state":
+                state = (row.get("state") or "").strip()
+                if state not in identity.OSM_STATES:
+                    raise ValueError(f"Ungültiger Status: {state!r}")
+                if not dry_run:
+                    identity.set_osm_state(
+                        paths.place_identity_db,
+                        source,
+                        source_place_id,
+                        state,
+                        reason="research",
+                        note=(row.get("note") or "").strip() or None,
+                    )
+            elif action == "coords":
+                lat = float(row.get("lat") or "")
+                lng = float(row.get("lng") or "")
+                if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                    raise ValueError(f"Koordinaten außerhalb des Bereichs: {lat}, {lng}")
+                if not dry_run:
+                    identity.set_manual_coords(
+                        paths.place_identity_db,
+                        source,
+                        source_place_id,
+                        lat,
+                        lng,
+                        note=(row.get("note") or "").strip() or None,
+                    )
+            else:
+                raise ValueError(f"Unbekannte Aktion: {action!r}")
+            summary.applied += 1
+            summary.actions.append(
+                {
+                    "line": line,
+                    "ref": ref,
+                    "action": action,
+                    "target": target,
+                    "osm": osm,
+                    "state": state,
+                    "lat": lat,
+                    "lng": lng,
+                    "confidence": (row.get("confidence") or "").strip() or None,
+                    "note": (row.get("note") or "").strip() or None,
+                }
+            )
+        except (ValueError, TypeError) as exc:
+            summary.errors.append(f"Zeile {line}: {exc}")
+    return summary
+
+
 def apply_research(
     paths: Paths,
     csv_path: Path,
     *,
     dry_run: bool = False,
 ) -> ApplySummary:
-    summary = ApplySummary()
     if not csv_path.exists():
         raise FileNotFoundError(f"Keine Research-CSV: {csv_path}")
     with csv_path.open(encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for line, row in enumerate(reader, start=2):
-            ref = (row.get("ref") or "").strip()
-            action = (row.get("action") or "").strip().lower()
-            if not ref or not action or action in ("noop", "skip"):
-                summary.skipped += 1
-                continue
-            try:
-                source, source_place_id = parse_place_ref(ref)
-                if action == "assign":
-                    osm_type, osm_id = identity.parse_osm_ref(
-                        (row.get("osm") or "").strip()
-                    )
-                    if not dry_run:
-                        identity.upsert_osm_assignment(
-                            paths.place_identity_db,
-                            source,
-                            source_place_id,
-                            osm_type,
-                            osm_id,
-                            method="manual",
-                            confidence=(row.get("confidence") or "manual").strip(),
-                            note=(row.get("note") or "research").strip(),
-                        )
-                        identity.clear_osm_candidates(
-                            paths.place_identity_db, source, source_place_id
-                        )
-                elif action == "merge":
-                    target_source, target_id = parse_place_ref(
-                        (row.get("target") or "").strip()
-                    )
-                    if not dry_run:
-                        upsert_rule(
-                            paths.place_rules_db,
-                            PlaceRule(
-                                source=source,
-                                source_place_id=source_place_id,
-                                action="merge",
-                                target_source=target_source,
-                                target_source_place_id=target_id,
-                                note=(row.get("note") or "research").strip(),
-                            ),
-                        )
-                elif action == "state":
-                    state = (row.get("state") or "").strip()
-                    if state not in identity.OSM_STATES:
-                        raise ValueError(f"Ungültiger Status: {state!r}")
-                    if not dry_run:
-                        identity.set_osm_state(
-                            paths.place_identity_db,
-                            source,
-                            source_place_id,
-                            state,
-                            reason="research",
-                            note=(row.get("note") or "").strip() or None,
-                        )
-                elif action == "coords":
-                    if not dry_run:
-                        identity.set_manual_coords(
-                            paths.place_identity_db,
-                            source,
-                            source_place_id,
-                            float(row.get("lat") or ""),
-                            float(row.get("lng") or ""),
-                            note=(row.get("note") or "").strip() or None,
-                        )
-                else:
-                    raise ValueError(f"Unbekannte Aktion: {action!r}")
-                summary.applied += 1
-            except (ValueError, TypeError) as exc:
-                summary.errors.append(f"Zeile {line}: {exc}")
-    return summary
+        return _apply_rows(paths, csv.DictReader(handle), dry_run=dry_run)
+
+
+def apply_research_text(
+    paths: Paths,
+    text: str,
+    *,
+    dry_run: bool = False,
+) -> ApplySummary:
+    reader = csv.DictReader(io.StringIO(text))
+    return _apply_rows(paths, reader, dry_run=dry_run)
