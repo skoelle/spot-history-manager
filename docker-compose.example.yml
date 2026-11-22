@@ -1,0 +1,15 @@
+# Example only. Copy to docker-compose.yml and adjust the volume path.
+# The container runs as UID/GID 1000; the mounted data directory must be
+# writable by that user. Do not set SPOT_HISTORY_DATA_ROOT: the app expects its
+# data at /app/data inside the image.
+services:
+  spot-history-manager:
+    image: ghcr.io/skoelle/spot-history-manager:latest
+    container_name: spot-history-manager
+    restart: unless-stopped
+    ports:
+      - "8345:8345"
+    volumes:
+      - ./data:/app/data
+    environment:
+      TZ: Europe/Berlin

@@ -72,6 +72,26 @@ Foursquare connector options: `--data-dir`, `--db`, `--sleep`, `--no-photos`,
 `--no-export`, `--verbose`. `probe` is read-only and writes no data. The web
 interface only reads the index; run `index build` separately beforehand.
 
+## 🐳 Docker
+
+GitHub Actions publishes the image to the GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/skoelle/spot-history-manager:latest
+docker run --rm \
+  -p 8345:8345 \
+  -v "$PWD/data:/app/data" \
+  ghcr.io/skoelle/spot-history-manager:latest
+```
+
+Mount the existing `data/` directory at `/app/data`; the image contains no data.
+The container runs as UID/GID 1000, so the mounted directory must be writable by
+that user. The web UI has no authentication; put it behind a reverse proxy if
+you expose it.
+
+For a persistent deployment, copy `docker-compose.example.yml` to
+`docker-compose.yml` and adjust the volume path.
+
 ## 🗂️ Data layout
 
 ```
@@ -522,6 +542,20 @@ there.
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+## 🤖 CI/CD
+
+- `.github/workflows/test.yml` runs the unit tests on pull requests and
+  non-`main` branches.
+- `.github/workflows/build.yml` runs the tests, builds a `linux/amd64` image, and
+  pushes `ghcr.io/skoelle/spot-history-manager:latest`. The image is rebuilt
+  weekly without cache; manual runs can request a cache-free build.
+- Optional deployment webhook: set the repository secrets `WEBHOOK_URL` and
+  `WEBHOOK_TOKEN`. If `WEBHOOK_URL` is set, the workflow sends a `POST` with
+  `Authorization: Bearer <token>` and expects HTTP 200 plus
+  `summary.updated > 0` in the JSON response.
+- The GHCR package is private by default. Either make it public in the package
+  settings or log the deploy host in to `ghcr.io` before pulling.
 
 ## 📝 Notes
 
