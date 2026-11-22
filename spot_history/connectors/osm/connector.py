@@ -170,7 +170,7 @@ class OsmConnector(BaseConnector):
         stats_parser.set_defaults(func=self.run)
 
     def _db_path(self, args: argparse.Namespace, paths) -> Path:
-        return Path(args.db) if args.db else paths.connector_dir("osm") / "osm.db"
+        return Path(args.db) if args.db else paths.osm_db
 
     def run(self, args: argparse.Namespace) -> int:
         paths = build_paths(args.data_root)

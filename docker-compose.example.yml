@@ -1,7 +1,11 @@
-# Example only. Copy to docker-compose.yml and adjust the volume path.
-# The container runs as UID/GID 1000; the mounted data directory must be
-# writable by that user. Do not set SPOT_HISTORY_DATA_ROOT: the app expects its
-# data at /app/data inside the image.
+# Example only. Copy to docker-compose.yml and adjust the volume paths.
+# The container runs as UID/GID 1000; both mounted directories must be
+# writable by that user.
+#
+# Layout:
+#   ./db    small SQLite databases, keep on the Docker host's local disk
+#   ./data  everything else (photos, thumbnails, exports, logs, backups),
+#           can be a Synology/NAS bind mount
 #
 # Tokens are interpolated from the .env file next to this compose file:
 #   FOURSQUARE_OAUTH_TOKEN=...
@@ -15,16 +19,17 @@ services:
     ports:
       - "8345:8345"
     volumes:
+      - ./db:/app/db
       - ./data:/app/data
-      # Optional: mount the Google Timeline file from outside and set
-      # GOOGLE_TIMELINE_INBOX to the path inside the container.
+      # Optional: Google-Timeline-Datei von außen einbinden und
+      # GOOGLE_TIMELINE_INBOX auf den Pfad im Container setzen.
       # - ./imports/google:/app/imports/google:ro
     environment:
       TZ: Europe/Berlin
+      SPOT_HISTORY_DATA_ROOT: /app/data
+      SPOT_HISTORY_DB_ROOT: /app/db
       FOURSQUARE_OAUTH_TOKEN: ${FOURSQUARE_OAUTH_TOKEN:-}
       FOURSQUARE_SERVICE_API_KEY: ${FOURSQUARE_SERVICE_API_KEY:-}
       FOURSQUARE_LEGACY_API_KEY: ${FOURSQUARE_LEGACY_API_KEY:-}
-      # Default is /app/data/google/inbox:
+      # Default ist /app/data/google/inbox:
       # GOOGLE_TIMELINE_INBOX: /app/imports/google
-      # Default is /app/data/yelp/export:
-      # YELP_EXPORT_DIR: /app/imports/yelp

@@ -10,11 +10,11 @@ for the map. Connectors must not modify each other.
 - Shared files (`core/`, `cli.py`, `connectors/base.py`, `CONNECTORS.md`) are
   changed only when necessary for all connectors — not for source-specific
   special cases.
-- Own database under `data/<name>/<name>.db`; no writes to other connectors or
-  to `data/index/`.
-- `data/places/place_rules.db` is cross-source and is written only by
+- Own database under `db/<name>/<name>.db`; no writes to other connectors or
+  to `db/index/`.
+- `db/places/place_rules.db` is cross-source and is written only by
   `spot_history places ...`, not by connectors.
-- No secrets, raw data, or media in Git. `data/` and `.env` are ignored.
+- No secrets, raw data, or media in Git. `data/`, `db/`, and `.env` are ignored.
 - The index is built from the connectors and is disposable. Source databases
   are the source of truth.
 
@@ -107,11 +107,11 @@ An import may be repeatable: same IDs via upsert, no duplicates.
 1. calls `iter_visits()` and optionally `iter_records()` for each connector,
 2. forms source-specific places from `source` + `source_place_id`,
 3. merges places conservatively by normalized name, coordinates (≤ 50 m), or
-   name + unique city; manual rules from `data/places/place_rules.db` take
+   name + unique city; manual rules from `db/places/place_rules.db` take
    precedence,
 4. resolves missing `tz_offset` values (same place, place time zone,
    city/country, neighborhood majority, or nearby Foursquare check-in),
-5. rewrites `data/index/index.db` (`canonical_places`, `place_links`,
+5. rewrites `db/index/index.db` (`canonical_places`, `place_links`,
    `merge_candidates`, visits with `canonical_place_id`),
 6. writes `data/exports/visits.geojson` (points with `[lng, lat]`).
 
@@ -128,13 +128,13 @@ long as they provide a stable `source_place_id` and — if available — `place_
 - `python3 -m unittest discover -s tests` must pass.
 - `python3 -m spot_history index build` must show the new connector in `sources`
   and in `visits.geojson`.
-- No secrets in `git status`; `.env` and `data/` remain untracked.
+- No secrets in `git status`; `.env`, `data/`, and `db/` remain untracked.
 
 ## Checklist for a new connector
 
 - [ ] `spot_history/connectors/<name>/__init__.py` exports `CONNECTOR`
 - [ ] `BaseConnector` implemented (`add_parser`, `run`, `iter_visits`)
-- [ ] own database under `data/<name>/<name>.db`
+- [ ] own database under `db/<name>/<name>.db`
 - [ ] canonical visits with stable IDs
 - [ ] media (if present) under `data/<name>/media/`
 - [ ] tests with fixtures

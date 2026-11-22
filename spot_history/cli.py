@@ -7,11 +7,13 @@ import json
 import os
 import sqlite3
 import sys
+from pathlib import Path
 
 from .connectors import discover
 from .core import audit as place_audit
 from .core import identity
 from .core import places as place_core
+from .core.backup import backup_databases
 from .core.config import build_paths
 from .core.index import build_index
 from .core.thumbs import generate_thumbnails
@@ -604,9 +606,32 @@ def _run_thumbs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_backup(args: argparse.Namespace) -> int:
+    paths = build_paths(args.data_root, args.db_root)
+    dest = Path(args.dest) if args.dest else paths.backup_dir
+    summary = backup_databases(
+        paths.db_root,
+        dest,
+        keep_days=args.keep_days,
+    )
+    if summary.errors:
+        print(
+            f"Backup mit {len(summary.errors)} Fehler(n) beendet.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"Backup: {len(summary.databases)} Datenbank(en) nach {dest}, "
+        f"{len(summary.removed)} alte Tagesordner entfernt."
+    )
+    return 0
+
+
 def _run_web(args: argparse.Namespace) -> int:
     if args.data_root:
         os.environ["SPOT_HISTORY_DATA_ROOT"] = args.data_root
+    if args.db_root:
+        os.environ["SPOT_HISTORY_DB_ROOT"] = args.db_root
     try:
         import uvicorn
     except ImportError:
@@ -841,10 +866,28 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser.add_argument("--json", action="store_true")
     audit_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
+    backup_parser = subparsers.add_parser(
+        "backup", help="SQLite-Datenbanken konsistent sichern"
+    )
+    backup_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis (default: ./data)")
+    backup_parser.add_argument("--db-root", help="SQLite-Verzeichnis (default: ./db)")
+    backup_parser.add_argument(
+        "--dest",
+        help="Zielverzeichnis (default: <data-root>/backup)",
+    )
+    backup_parser.add_argument(
+        "--keep-days",
+        type=int,
+        default=3,
+        help="Anzahl aufzubewahrender Tages-Backups (default: 3)",
+    )
+    backup_parser.set_defaults(func=_run_backup)
+
     web_parser = subparsers.add_parser("web", help="Web-Oberfläche starten")
     web_parser.add_argument("--host", default="0.0.0.0")
     web_parser.add_argument("--port", type=int, default=8345)
     web_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis (default: ./data)")
+    web_parser.add_argument("--db-root", help="SQLite-Verzeichnis (default: ./db)")
     web_parser.add_argument("--reload", action="store_true")
     web_parser.set_defaults(func=_run_web)
 

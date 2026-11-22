@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from ...core.config import ROOT
+from ...core.config import build_paths
 from .db import Database, iso_now
 from .ids import normalize_name
 
@@ -158,7 +158,7 @@ def _foursquare_venues(
         finally:
             conn.close()
         return rows
-    fallback = ROOT / "data" / "foursquare" / "foursquare.db"
+    fallback = build_paths().connector_db("foursquare", "foursquare.db")
     if fallback.exists():
         conn = sqlite3.connect(f"file:{fallback}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
@@ -415,7 +415,7 @@ def geocode_places(
 ) -> GeocodeSummary:
     summary = GeocodeSummary()
     geocoder = geocoder or NominatimGeocoder()
-    index_path = Path(index_db) if index_db else ROOT / "data" / "index" / "index.db"
+    index_path = Path(index_db) if index_db else build_paths().index_db
 
     if reverse:
         _reverse_geocode(

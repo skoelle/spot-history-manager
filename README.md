@@ -80,19 +80,28 @@ GitHub Actions publishes the image to the GitHub Container Registry:
 docker pull ghcr.io/skoelle/spot-history-manager:latest
 docker run --rm \
   -p 8345:8345 \
+  -v "$PWD/db:/app/db" \
   -v "$PWD/data:/app/data" \
   ghcr.io/skoelle/spot-history-manager:latest
 ```
 
-Mount the existing `data/` directory at `/app/data`; the image contains no data.
-The container runs as UID/GID 1000, so the mounted directory must be writable by
-that user. The web UI has no authentication; put it behind a reverse proxy if
-you expose it.
+Two directories are mounted; the image contains no data:
+
+- `db/` → `/app/db`: only the SQLite databases, keep this on the Docker host's
+  local disk (default: `./db`).
+- `data/` → `/app/data`: photos, thumbnails, media, exports, sync logs, the
+  Google inbox, and backups. This can be a Synology/NAS bind mount.
+
+The container runs as UID/GID 1000, so both mounted directories must be
+writable by that user. The web UI has no authentication; put it behind a reverse
+proxy if you expose it.
 
 For a persistent deployment, copy `docker-compose.example.yml` to
-`docker-compose.yml` and adjust the volume path. The image does not contain a
-`.env`; Compose interpolates the tokens from the `.env` file next to
-`docker-compose.yml` and passes them into the container.
+`docker-compose.yml` and adjust the volume paths (`./db` local, `./data` on the
+NAS). The image does not contain a `.env`; Compose interpolates the tokens from
+the `.env` file next to `docker-compose.yml` and passes them into the container.
+`SPOT_HISTORY_DATA_ROOT` and `SPOT_HISTORY_DB_ROOT` point the app at the two
+mounts.
 
 ### 🔄 Sync buttons in the web UI
 
@@ -122,26 +131,86 @@ the path inside the container. The Yelp import expects the export in
 ## 🗂️ Data layout
 
 ```
-data/
-├── foursquare/
-│   ├── foursquare.db          source (check-ins, venues, photos, lists, tips, profile, sync state)
-│   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues, venue_details (CSV)
-│   ├── places_api_venue_details.json  baseline dump from the Places API (import source, gitignored)
-│   ├── profile/               local profile picture
-│   ├── photos/<checkin_id>/   image files (standalone under photos/_standalone/)
-│   └── thumbs/                320 px thumbnails for the web UI
-├── yelp/                      yelp.db + media/ + thumbs/ (HTML import)
-├── google/                    google.db (source) + osm_cache.db (enrichment cache)
+db/                            local SQLite databases only
+├── foursquare/foursquare.db   source (check-ins, venues, photos, lists, tips, profile, sync state)
+├── yelp/yelp.db               source (HTML import)
+├── google/google.db           source (Timeline import)
+├── google/osm_cache.db        OSM enrichment cache
 ├── osm/osm.db                 OSM POI cache and query cache (Overpass/Nominatim)
 ├── places/place_rules.db      persistent manual merge/unmerge rules
 ├── places/identity.db         persistent OSM assignments + URL aliases
-├── index/index.db             central, rebuildable index
-└── exports/visits.geojson     map points from all sources
+└── index/index.db             central, rebuildable index
+
+data/                          can live on a NAS
+├── foursquare/
+│   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues, venue_details (CSV)
+│   ├── places_api_venue_details.json  baseline dump from the Places API (import source)
+│   ├── profile/               local profile picture
+│   ├── photos/<checkin_id>/   image files (standalone under photos/_standalone/)
+│   └── thumbs/                320 px thumbnails for the web UI
+├── yelp/                      media/ + thumbs/ (HTML import)
+├── google/inbox/              Google Timeline export input
+├── exports/visits.geojson     map points from all sources
+├── sync/logs/                 logs of the web UI sync jobs
+└── backup/                    daily SQLite backups (see below)
 ```
 
 The source databases are the source of truth. The index is rebuilt from the
-connectors and the rules in `data/places/place_rules.db` on every `index build`
+connectors and the rules in `db/places/place_rules.db` on every `index build`
 and can be safely deleted. Only the rules database is persistent.
+
+### 💾 Backups
+
+`python -m spot_history backup` copies every database under `db/` with the
+SQLite online backup API (WAL-safe, also while the app is running), verifies it
+with `PRAGMA quick_check`, and writes it to `data/backup/YYYY-MM-DD/`. The
+`--keep-days` option (default `3`) keeps the three most recent daily backups.
+
+In Docker, run it from the host via systemd or cron, for example:
+
+```bash
+docker exec spot-history-manager python -m spot_history backup \
+  --db-root /app/db --dest /app/data/backup --keep-days 3
+```
+
+Example units are in `deploy/spot-history-backup.service` and
+`deploy/spot-history-backup.timer` (daily at 03:30, `Persistent=true`):
+
+```bash
+sudo cp deploy/spot-history-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now spot-history-backup.timer
+```
+
+Cron alternative on the host:
+
+```cron
+30 3 * * * /usr/bin/docker exec spot-history-manager python -m spot_history backup --db-root /app/db --dest /app/data/backup --keep-days 3
+```
+
+With a NAS-backed `data/` mount, the backups end up off the Docker host.
+Retention runs after every backup; folders older than the configured number of
+days are removed.
+
+### 🔁 Migration from the old layout
+
+Older versions stored the databases inside `data/`. Stop the container and move
+them once; the non-database files stay where they are:
+
+```bash
+mkdir -p db/{foursquare,yelp,google,osm,places,index}
+mv data/foursquare/foursquare.db* db/foursquare/
+mv data/yelp/yelp.db* db/yelp/
+mv data/google/google.db* data/google/osm_cache.db db/google/
+mv data/osm/osm.db db/osm/
+mv data/places/*.db db/places/
+mv data/index/index.db db/index/
+rmdir data/osm data/places data/index 2>/dev/null || true
+chown -R 1000:1000 db
+```
+
+Then set `SPOT_HISTORY_DB_ROOT` (in Compose: `/app/db`) and start the
+container again. A `backup` run right before moving is recommended.
 
 ## 🖥️ Web interface
 
@@ -207,7 +276,7 @@ OSM ID, conflicts). On the detail page of an unmatched place there is an
 **`OSM-Objekt zuordnen`** panel with manual input (`node/123`,
 `way-247857140`, or an OSM URL) and — if available — candidates from `osm sync`
 that can be accepted. For matched places, the assignment can be removed there.
-Every change writes to `data/places/identity.db` and immediately rebuilds the
+Every change writes to `db/places/identity.db` and immediately rebuilds the
 index; afterwards the page redirects to the new key. The POST endpoints check
 the origin (same-origin), but the UI, like the rest, has no login and is
 intended for LAN/internal use.
@@ -275,9 +344,9 @@ far-apart coordinates, or different OSM IDs.
 
 Once an OSM ID is assigned, it becomes a hard identity: source places with the
 same OSM ID are always merged, and source places with different OSM IDs never
-are. Assignments are stored persistently in `data/places/identity.db` and
+are. Assignments are stored persistently in `db/places/identity.db` and
 survive every index rebuild; aliases for redirects are stored there as well.
-Manual decisions are stored persistently in `data/places/place_rules.db` and
+Manual decisions are stored persistently in `db/places/place_rules.db` and
 survive every index rebuild:
 
 ```bash
@@ -300,7 +369,7 @@ changes.
 The venue detail page also offers an **`Ort zusammenführen`** panel: nearby
 places with distance and name similarity can be merged directly; already merged
 source places can be split there again. Both write rules to
-`data/places/place_rules.db` and rebuild the index.
+`db/places/place_rules.db` and rebuild the index.
 
 `merge`, `unmerge`, and `reset` rebuild the index immediately by default
 (`--no-build` skips this). Current data state: 2462 source places, 2190
@@ -323,7 +392,7 @@ Known limits:
   remains empty.
 - Public place URLs use `canonical_key` (`osm-...` or `local-...`), not the
   internal integer `id`. Previous keys remain available as redirects via
-  `canonical_aliases` (and `data/places/identity.db`).
+  `canonical_aliases` (and `db/places/identity.db`).
 
 ## 🌍 OSM matching
 
@@ -375,8 +444,8 @@ python3 -m spot_history places osm-states
 python3 -m spot_history places mark-unresolved --state no_osm --dry-run
 ```
 
-- `osm sync` only reads the index and writes exclusively to `data/osm/osm.db`
-  (POI/query cache) and `data/places/identity.db` (assignments/candidates).
+- `osm sync` only reads the index and writes exclusively to `db/osm/osm.db`
+  (POI/query cache) and `db/places/identity.db` (assignments/candidates).
   Source databases are not modified.
 - Overpass is queried in batches per `--chunk` points (default 40, radius 120 m).
   If a batch fails, the affected places are fetched via Nominatim; Nominatim is
@@ -386,7 +455,7 @@ python3 -m spot_history places mark-unresolved --state no_osm --dry-run
   (`old_name`, `alt_name`, `brand`, `operator`, `name:*`) or fuzzy name
   comparison always end up as candidates in the identity DB and must be
   confirmed via `osm-accept`, `assign-osm`, or the web UI.
-- `osm rematch` evaluates open places exclusively against `data/osm/osm.db` (no
+- `osm rematch` evaluates open places exclusively against `db/osm/osm.db` (no
   Overpass/Nominatim) and can therefore add candidates from the cache later.
   Address/street names are tracked as `place_kind = address` and are not matched
   as venues.
@@ -552,14 +621,14 @@ python3 -m spot_history google osm
 python3 -m spot_history google stats
 ```
 
-- `google import` rebuilds `data/google/google.db` from all files in the inbox
+- `google import` rebuilds `db/google/google.db` from all files in the inbox
   folder on every run. Duplicate visits are merged via stable IDs; Google place
   IDs with identical coordinates (≤15 m) are consolidated into one place.
 - `Home` and `Work` are shown as `Zuhause`/`Arbeit`; the addresses of these
   places are not displayed.
-- `google osm` first uses the existing cache in `data/osm/osm.db` (read-only),
+- `google osm` first uses the existing cache in `db/osm/osm.db` (read-only),
   then Overpass (`nwr(around:55)[name]`) and Nominatim reverse as a fallback.
-  Results are stored in `data/google/osm_cache.db`.
+  Results are stored in `db/google/osm_cache.db`.
 - Only unambiguous matches ≤25 m are accepted automatically. Matches between
   25 and 50 m and ambiguous results become candidates in `google osm-candidates`;
   they can be accepted there with `google osm-accept`.
@@ -615,13 +684,14 @@ python3 -m unittest discover -s tests
 
 ## 📝 Notes
 
-- `.env` and `data/` are gitignored and must not be committed.
+- `.env`, `data/`, and `db/` are gitignored and must not be committed.
 - The raw JSON also contains names of users who liked check-ins.
 - Photos are loaded at original resolution; `--no-photos` skips this.
 - The Google Timeline export remains manual (iOS share sheet); `google.sh` then
   handles import, OSM enrichment, and index rebuild.
-- No cron/daemon: sync and index builds are started manually via the CLI or the
-  Sync page in the web UI.
+- No app-internal cron/daemon: sync and index builds are started manually via
+  the CLI or the Sync page. Only the SQLite backup is meant to run from a host
+  systemd timer or cron job.
 
 ## 📄 License
 

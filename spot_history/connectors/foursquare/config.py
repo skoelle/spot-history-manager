@@ -6,7 +6,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...core.config import ROOT, load_env
+from ...core.config import (
+    connector_data_dir,
+    connector_db_path,
+    load_env,
+)
 
 
 @dataclass
@@ -58,10 +62,21 @@ def build_config(
             "FOURSQUARE_OAUTH_TOKEN fehlt. Bitte in .env eintragen "
             "oder zuerst den OAuth-Flow ausführen."
         )
+    resolved_data_dir, data_explicit = connector_data_dir("foursquare", data_dir)
+    resolved_db_path = (
+        Path(db_path)
+        if db_path
+        else connector_db_path(
+            "foursquare",
+            "foursquare.db",
+            resolved_data_dir,
+            data_explicit,
+        )
+    )
     return FoursquareConfig(
         token=token,
-        data_dir=Path(data_dir) if data_dir else ROOT / "data" / "foursquare",
-        db_path=Path(db_path) if db_path else None,
+        data_dir=resolved_data_dir,
+        db_path=resolved_db_path,
         service_api_key=os.environ.get("FOURSQUARE_SERVICE_API_KEY", "").strip(),
         sleep=0.3 if sleep is None else sleep,
         download_photos=download_photos,

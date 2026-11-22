@@ -34,7 +34,7 @@ def _load_poi(
 ) -> Poi | None:
     paths = [
         config.osm_cache_path,
-        config.data_dir.parent / "osm" / "osm.db",
+        config.osm_db_path,
     ]
     for path in paths:
         if not path.exists():

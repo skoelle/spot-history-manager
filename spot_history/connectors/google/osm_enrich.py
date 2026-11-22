@@ -326,13 +326,13 @@ def enrich(
             return summary
 
         index = PoiIndex()
-        shared_path = config.data_dir.parent / "osm" / "osm.db"
+        shared_path = config.osm_db_path
         shared = _load_shared_cache(shared_path, index)
         cached = _load_cache_pois(osm_conn, index)
         if verbose:
             log(
                 f"Google-OSM: {len(pending)} offene Orte, "
-                f"{shared} POIs aus data/osm, {cached} aus google/osm_cache"
+                f"{shared} POIs aus db/osm, {cached} aus db/google/osm_cache"
             )
 
         unresolved: list[dict] = []

@@ -25,6 +25,7 @@ from . import sync_jobs, sync_status
 
 BASE = Path(__file__).resolve().parent
 paths = build_paths(os.environ.get("SPOT_HISTORY_DATA_ROOT"))
+os.environ.setdefault("SPOT_HISTORY_DB_ROOT", str(paths.db_root))
 sync_runner = sync_jobs.JobRunner()
 
 
@@ -462,7 +463,7 @@ def venue_detail(
         for candidate in identity.load_osm_candidates(paths.place_identity_db)
         if (candidate["source"], candidate["source_place_id"]) in member_keys
     ]
-    osm_path = paths.connector_dir("osm") / "osm.db"
+    osm_path = paths.osm_db
     osm_name = None
     if venue["osm_type"] and venue["osm_id"] is not None:
         venue_osm_key = (venue["osm_type"], int(venue["osm_id"]))

@@ -459,7 +459,7 @@ def sync(
         log("OSM: keine offenen Orte zu matchen.")
         return summary
 
-    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    db_path = osm_db_path or paths.osm_db
     conn = osm_db.open_db(db_path)
     overpass = OverpassClient(sleep=sleep, verbose=verbose)
     nominatim = NominatimClient(verbose=verbose)
@@ -653,7 +653,7 @@ def rematch(
         log("OSM: keine offenen Orte für den Offline-Rematch.")
         return summary
 
-    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    db_path = osm_db_path or paths.osm_db
     if not db_path.exists():
         raise FileNotFoundError(f"Kein OSM-Cache vorhanden: {db_path}")
     conn = osm_db.open_db(db_path)
@@ -782,7 +782,7 @@ def net_scan(
         log("OSM: kein offener Venue ohne Vorschlag für den Netzwerk-Scan.")
         return summary
 
-    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    db_path = osm_db_path or paths.osm_db
     conn = osm_db.open_db(db_path)
     nominatim = NominatimClient(sleep=sleep, verbose=verbose)
     try:
@@ -925,7 +925,7 @@ def address_scan(
         log("OSM: kein offener Venue mit Adresse für den Adress-Scan.")
         return summary
 
-    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    db_path = osm_db_path or paths.osm_db
     conn = osm_db.open_db(db_path)
     nominatim = NominatimClient(sleep=sleep, verbose=verbose)
     try:
@@ -1048,7 +1048,7 @@ def contact_scan(
         log("OSM: kein offener Venue mit Kontaktdaten für den Contact-Scan.")
         return summary
 
-    db_path = osm_db_path or (paths.connector_dir("osm") / "osm.db")
+    db_path = osm_db_path or paths.osm_db
     conn = osm_db.open_db(db_path)
     try:
         for place in pending:

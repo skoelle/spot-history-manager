@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...core.config import ROOT
+from ...core.config import ROOT, connector_data_dir, connector_db_path
 
 DEFAULT_EXPORT_DIR = ROOT / "data" / "yelp" / "export"
 
@@ -41,14 +41,24 @@ def build_config(
     copy_media: bool = True,
 ) -> YelpConfig:
     env_export = os.environ.get("YELP_EXPORT_DIR", "").strip()
-    env_data = os.environ.get("YELP_DATA_DIR", "").strip()
     if export_dir is None:
         export_dir = Path(env_export) if env_export else DEFAULT_EXPORT_DIR
-    if data_dir is None:
-        data_dir = Path(env_data) if env_data else ROOT / "data" / "yelp"
+    resolved_data_dir, data_explicit = connector_data_dir(
+        "yelp", data_dir, "YELP_DATA_DIR"
+    )
+    resolved_db_path = (
+        Path(db_path)
+        if db_path
+        else connector_db_path(
+            "yelp",
+            "yelp.db",
+            resolved_data_dir,
+            data_explicit,
+        )
+    )
     return YelpConfig(
         export_dir=Path(export_dir),
-        data_dir=Path(data_dir),
-        db_path=Path(db_path) if db_path else None,
+        data_dir=resolved_data_dir,
+        db_path=resolved_db_path,
         copy_media=copy_media,
     )

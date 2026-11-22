@@ -6,6 +6,7 @@ import argparse
 import sqlite3
 from pathlib import Path
 
+from ...core.config import build_paths
 from ..base import BaseConnector, Photo, Visit
 from .config import build_config
 from .db import Database, iso_range
@@ -32,7 +33,7 @@ class YelpConnector(BaseConnector):
         common.add_argument("--geocode", action="store_true", help="nach dem Import Geocoding ausführen")
 
         for command, help_text in (
-            ("import", "Export einlesen und in data/yelp/yelp.db schreiben"),
+            ("import", "Export einlesen und in db/yelp/yelp.db schreiben"),
             ("stats", "Zusammenfassung anzeigen"),
         ):
             sub = commands.add_parser(command, parents=[common], help=help_text)
@@ -109,9 +110,7 @@ class YelpConnector(BaseConnector):
             print(f"Keine Yelp-Datenbank: {db_path}")
             return 1
         db = Database(db_path).open()
-        index_db = getattr(args, "index_db", None) or (
-            Path(config.data_dir).parent / "index" / "index.db"
-        )
+        index_db = getattr(args, "index_db", None) or build_paths().index_db
         try:
             summary = geocode_places(
                 db,
