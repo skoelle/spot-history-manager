@@ -10,6 +10,7 @@ from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.connectors.osm import db as osm_db
 from spot_history.core.config import build_paths
 from spot_history.core.identity import (
+    set_manual_coords,
     set_osm_state,
     upsert_osm_assignment,
     upsert_osm_candidate,
@@ -841,6 +842,48 @@ class WebDataTest(unittest.TestCase):
                 )
                 self.assertEqual(venues[0]["place_state"], "closed")
                 self.assertEqual(venues[0]["place_state_reason"], "test")
+            finally:
+                conn.close()
+
+    def test_manual_coords_priority_and_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            set_manual_coords(
+                paths.place_identity_db, "fake", "p1", 48.2, 11.6
+            )
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                venue = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Michaeligarten"), 5, 0
+                )[0]
+                self.assertEqual(venue["coords_source"], "manual")
+                self.assertEqual(venue["lat"], 48.2)
+                self.assertEqual(venue["lng"], 11.6)
+            finally:
+                conn.close()
+
+            upsert_osm_assignment(
+                paths.place_identity_db, "fake", "p1", "node", 42
+            )
+            osm_conn = osm_db.open_db(paths.osm_db)
+            try:
+                osm_db.save_pois(
+                    osm_conn,
+                    [osm_db.Poi("node", 42, "Michaeligarten", 48.3, 11.7)],
+                )
+            finally:
+                osm_conn.close()
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                venue = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Michaeligarten"), 5, 0
+                )[0]
+                self.assertEqual(venue["coords_source"], "osm")
+                self.assertEqual(venue["lat"], 48.3)
+                self.assertEqual(venue["lng"], 11.7)
             finally:
                 conn.close()
 

@@ -15,11 +15,12 @@ RUN groupadd --gid 1000 app \
 COPY --chown=app:app LICENSE .
 COPY --chown=app:app spot_history ./spot_history
 
-RUN mkdir -p /app/data /app/db && chown app:app /app/data /app/db
+RUN mkdir -p /app/data /app/db /app/backup \
+    && chown app:app /app/data /app/db /app/backup
 
 USER app
 
-VOLUME ["/app/data", "/app/db"]
+VOLUME ["/app/data", "/app/db", "/app/backup"]
 EXPOSE 8345
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

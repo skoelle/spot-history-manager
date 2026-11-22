@@ -120,6 +120,54 @@ def build_commands(action: str, data_root: Path) -> list[list[str]]:
             ["osm", "sync", "--data-root", str(data_root)],
             index_build,
         ],
+        "osm-rematch": [
+            ["osm", "rematch", "--data-root", str(data_root)],
+            index_build,
+        ],
+        "osm-net-scan": [
+            ["osm", "net-scan", "--data-root", str(data_root)],
+            index_build,
+        ],
+        "osm-address-scan": [
+            ["osm", "address-scan", "--data-root", str(data_root)],
+            index_build,
+        ],
+        "osm-contact-scan": [
+            ["osm", "contact-scan", "--data-root", str(data_root)],
+            index_build,
+        ],
+        "osm-deep-scan": [
+            ["backup", "--keep-days", "3"],
+            ["osm", "deep-scan", "--data-root", str(data_root)],
+            index_build,
+        ],
+        "yelp-worklist": [
+            [
+                "places",
+                "research-worklist",
+                "--source",
+                "yelp",
+                "--output",
+                str(Path(data_root) / "exports" / "yelp-research.csv"),
+                "--data-root",
+                str(data_root),
+            ],
+        ],
+        "yelp-apply-research": [
+            ["backup", "--keep-days", "3"],
+            [
+                "places",
+                "apply-research",
+                str(Path(data_root) / "exports" / "yelp-research-decisions.csv"),
+                "--data-root",
+                str(data_root),
+                "--no-build",
+            ],
+            index_build,
+        ],
+        "backup": [
+            ["backup", "--keep-days", "3"],
+        ],
         "index-build": [index_build],
         "index-thumbs": [
             ["index", "thumbs", "--data-root", str(data_root)],
@@ -174,6 +222,25 @@ def build_actions(data_root: Path) -> tuple[SyncAction, ...]:
             commands=tuple(tuple(cmd) for cmd in build_commands("yelp-geocode", data_root)),
         ),
         SyncAction(
+            key="yelp-worklist",
+            label="Yelp Recherche-Worklist",
+            description="Erzeugt data/exports/yelp-research.csv mit Kandidaten und Same-Day-Hinweisen.",
+            group="Yelp",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("yelp-worklist", data_root)
+            ),
+        ),
+        SyncAction(
+            key="yelp-apply-research",
+            label="Yelp Recherche anwenden",
+            description="Wendet data/exports/yelp-research-decisions.csv an und baut den Index neu.",
+            group="Yelp",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("yelp-apply-research", data_root)
+            ),
+            confirm="Recherche-Entscheidungen anwenden? Vorher wird ein Backup erstellt.",
+        ),
+        SyncAction(
             key="google-import",
             label="Google Import",
             description="Importiert den Timeline-Export aus data/google/inbox.",
@@ -194,6 +261,59 @@ def build_actions(data_root: Path) -> tuple[SyncAction, ...]:
             description="Matcht offene Orte über Overpass/Nominatim.",
             group="OpenStreetMap",
             commands=tuple(tuple(cmd) for cmd in build_commands("osm-sync", data_root)),
+        ),
+        SyncAction(
+            key="osm-rematch",
+            label="OSM Rematch",
+            description="Matcht offene Orte offline gegen den POI-Cache.",
+            group="OpenStreetMap",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("osm-rematch", data_root)
+            ),
+        ),
+        SyncAction(
+            key="osm-net-scan",
+            label="OSM Netzwerk-Scan",
+            description="Sucht offene Venues ohne Vorschlag über Nominatim.",
+            group="OpenStreetMap",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("osm-net-scan", data_root)
+            ),
+        ),
+        SyncAction(
+            key="osm-address-scan",
+            label="OSM Adress-Scan",
+            description="Sucht Nachfolger an derselben Adresse über Nominatim.",
+            group="OpenStreetMap",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("osm-address-scan", data_root)
+            ),
+        ),
+        SyncAction(
+            key="osm-contact-scan",
+            label="OSM Contact-Scan",
+            description="Matcht Website, Telefon und E-Mail gegen OSM-POIs.",
+            group="OpenStreetMap",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("osm-contact-scan", data_root)
+            ),
+        ),
+        SyncAction(
+            key="osm-deep-scan",
+            label="OSM Deep-Scan",
+            description="Rematch, Name-, Adress- und Contact-Scan inkl. Backup und Index.",
+            group="OpenStreetMap",
+            commands=tuple(
+                tuple(cmd) for cmd in build_commands("osm-deep-scan", data_root)
+            ),
+            confirm="Deep-Scan ausführen? Vorher wird ein Backup erstellt.",
+        ),
+        SyncAction(
+            key="backup",
+            label="Backup erstellen",
+            description="Sichert alle SQLite-Datenbanken nach SPOT_HISTORY_BACKUP_ROOT.",
+            group="Wartung",
+            commands=tuple(tuple(cmd) for cmd in build_commands("backup", data_root)),
         ),
         SyncAction(
             key="index-build",
@@ -222,6 +342,7 @@ GROUP_HINTS = {
     "Google": "Importiert aus data/google/inbox bzw. GOOGLE_TIMELINE_INBOX.",
     "OpenStreetMap": "Abgleich offener Orte über Overpass/Nominatim.",
     "Index": "Wird nach jedem Sync automatisch ausgeführt.",
+    "Wartung": "Backups und manuelle Wartung.",
 }
 
 GROUP_KEYS = {
@@ -230,13 +351,21 @@ GROUP_KEYS = {
     "Google": "google",
     "OpenStreetMap": "osm",
     "Index": "index",
+    "Wartung": "maintenance",
 }
 
 
 def action_groups(data_root: Path) -> list[dict]:
     actions = build_actions(data_root)
     groups: list[dict] = []
-    for name in ("Foursquare", "Yelp", "Google", "OpenStreetMap", "Index"):
+    for name in (
+        "Foursquare",
+        "Yelp",
+        "Google",
+        "OpenStreetMap",
+        "Index",
+        "Wartung",
+    ):
         items = [action for action in actions if action.group == name]
         if items:
             groups.append(

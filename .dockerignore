@@ -4,6 +4,7 @@
 .env
 data
 db
+backup
 tests
 __pycache__
 *.py[cod]

@@ -24,6 +24,18 @@ MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt",
 FROM = "FROM visits v LEFT JOIN canonical_places p ON p.id = v.canonical_place_id"
 
 
+def coords_source(row) -> str:
+    if row["osm_lat"] is not None and row["osm_lng"] is not None:
+        return "osm"
+    if (
+        "manual_lat" in row.keys()  # noqa: SIM118
+        and row["manual_lat"] is not None
+        and row["manual_lng"] is not None
+    ):
+        return "manual"
+    return "source"
+
+
 @dataclass(frozen=True)
 class Filters:
     city: str | None = None
@@ -251,11 +263,7 @@ def _format_row(row: sqlite3.Row) -> dict:
         "lng": row["lng"],
         "source_lat": row["source_lat"],
         "source_lng": row["source_lng"],
-        "coords_source": (
-            "osm"
-            if row["osm_lat"] is not None and row["osm_lng"] is not None
-            else "source"
-        ),
+        "coords_source": coords_source(row),
         "note": row["note"],
         "source_url": row["source_url"],
         "photo_count": row["photo_count"] or 0,
@@ -276,8 +284,10 @@ VISIT_SELECT = (
     "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
     "p.category, p.category_group, p.category_group_source, "
     "p.address, p.city, p.state, p.country_code, "
-    "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
+    "COALESCE(p.osm_lat, p.manual_lat, p.lat) AS lat, "
+    "COALESCE(p.osm_lng, p.manual_lng, p.lng) AS lng, "
     "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
+    "p.manual_lat, p.manual_lng, "
     "(SELECT COUNT(*) FROM photos ph WHERE ph.visit_id = v.id) AS photo_count "
     f"{FROM}"
 )
@@ -301,8 +311,8 @@ def query_visits(
 def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
     where, params = where_clause(filters)
     condition = (
-        "COALESCE(p.osm_lat, p.lat) IS NOT NULL "
-        "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL"
+        "COALESCE(p.osm_lat, p.manual_lat, p.lat) IS NOT NULL "
+        "AND COALESCE(p.osm_lng, p.manual_lng, p.lng) IS NOT NULL"
     )
     if where:
         where = where + " AND " + condition
@@ -317,11 +327,7 @@ def query_map_points(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
             "lng": row["lng"],
             "source_lat": row["source_lat"],
             "source_lng": row["source_lng"],
-            "coords_source": (
-                "osm"
-                if row["osm_lat"] is not None and row["osm_lng"] is not None
-                else "source"
-            ),
+            "coords_source": coords_source(row),
             "place": row["place_name"],
             "place_id": row["place_id"],
             "place_key": row["place_key"],
@@ -664,8 +670,15 @@ def count_venues(conn: sqlite3.Connection, filters: VenueFilters) -> int:
 
 
 def _venue_coords(row: sqlite3.Row) -> tuple[float, float] | None:
-    lat = row["osm_lat"] if row["osm_lat"] is not None else row["lat"]
-    lng = row["osm_lng"] if row["osm_lng"] is not None else row["lng"]
+    if row["osm_lat"] is not None:
+        lat, lng = row["osm_lat"], row["osm_lng"]
+    elif (
+        "manual_lat" in row.keys()  # noqa: SIM118
+        and row["manual_lat"] is not None
+    ):
+        lat, lng = row["manual_lat"], row["manual_lng"]
+    else:
+        lat, lng = row["lat"], row["lng"]
     if lat is None or lng is None:
         return None
     return float(lat), float(lng)
@@ -680,7 +693,8 @@ def nearby_venues(
     min_similarity: float = 0.45,
 ) -> list[dict]:
     current = conn.execute(
-        "SELECT id, name, lat, lng, osm_lat, osm_lng FROM canonical_places "
+        "SELECT id, name, lat, lng, osm_lat, osm_lng, manual_lat, manual_lng "
+        "FROM canonical_places "
         "WHERE id = ?",
         (place_id,),
     ).fetchone()
@@ -692,6 +706,7 @@ def nearby_venues(
     lat, lng = coords
     rows = conn.execute(
         "SELECT id, canonical_key, name, lat, lng, osm_lat, osm_lng, "
+        "manual_lat, manual_lng, "
         "sources_json, match_status FROM canonical_places WHERE id != ?",
         (place_id,),
     ).fetchall()
@@ -742,8 +757,10 @@ VENUE_SELECT = (
     "SELECT p.id, p.canonical_key, p.primary_source AS source, p.name, "
     "p.category, p.category_group, p.category_group_source, "
     "p.address, p.city, p.state, p.postal_code, p.country_code, "
-    "COALESCE(p.osm_lat, p.lat) AS lat, COALESCE(p.osm_lng, p.lng) AS lng, "
+    "COALESCE(p.osm_lat, p.manual_lat, p.lat) AS lat, "
+    "COALESCE(p.osm_lng, p.manual_lng, p.lng) AS lng, "
     "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
+    "p.manual_lat, p.manual_lng, "
     "p.sources_json, p.source_count, p.osm_type, p.osm_id, "
     "p.match_status, p.place_kind, p.has_osm_candidate, "
     "p.place_state, p.place_state_reason, "
@@ -1173,11 +1190,13 @@ def _format_venue(
         "source_lng": row["source_lng"],
         "osm_lat": row["osm_lat"],
         "osm_lng": row["osm_lng"],
-        "coords_source": (
-            "osm"
-            if row["osm_lat"] is not None and row["osm_lng"] is not None
-            else "source"
+        "manual_lat": (
+            row["manual_lat"] if "manual_lat" in row.keys() else None  # noqa: SIM118
         ),
+        "manual_lng": (
+            row["manual_lng"] if "manual_lng" in row.keys() else None  # noqa: SIM118
+        ),
+        "coords_source": coords_source(row),
         "visits_count": int(row["visits_count"] or 0),
         "photo_count": int(row["photo_count"] or 0),
         "source_count": int(row["source_count"] or len(links)),

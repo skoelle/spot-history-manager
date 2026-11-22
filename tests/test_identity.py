@@ -7,14 +7,17 @@ import unittest
 from pathlib import Path
 
 from spot_history.core.identity import (
+    delete_manual_coords,
     delete_osm_assignment,
     delete_osm_state,
     load_aliases,
+    load_manual_coords,
     load_osm_assignments,
     load_osm_states,
     local_key,
     parse_osm_ref,
     record_aliases,
+    set_manual_coords,
     set_osm_state,
     upsert_osm_assignment,
     validate_osm,
@@ -90,6 +93,23 @@ class IdentityTest(unittest.TestCase):
             self.assertTrue(delete_osm_state(path, "yelp", "y1"))
             self.assertEqual(load_osm_states(path), {})
             self.assertFalse(delete_osm_state(path, "yelp", "y1"))
+
+    def test_manual_coords_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "places" / "identity.db"
+            self.assertEqual(load_manual_coords(path), {})
+            set_manual_coords(
+                path, "yelp", "y1", 48.1372, 11.5755, note="research"
+            )
+            coords = load_manual_coords(path)
+            self.assertAlmostEqual(coords[("yelp", "y1")]["lat"], 48.1372)
+            self.assertAlmostEqual(coords[("yelp", "y1")]["lng"], 11.5755)
+            self.assertEqual(coords[("yelp", "y1")]["note"], "research")
+            with self.assertRaises(ValueError):
+                set_manual_coords(path, "yelp", "y1", 91.0, 11.0)
+            self.assertTrue(delete_manual_coords(path, "yelp", "y1"))
+            self.assertEqual(load_manual_coords(path), {})
+            self.assertFalse(delete_manual_coords(path, "yelp", "y1"))
 
 
 if __name__ == "__main__":

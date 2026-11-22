@@ -13,6 +13,7 @@ from .connectors import discover
 from .core import audit as place_audit
 from .core import identity
 from .core import places as place_core
+from .core import research as place_research
 from .core.backup import backup_databases
 from .core.config import build_paths
 from .core.index import build_index
@@ -76,6 +77,16 @@ def _run_places(args: argparse.Namespace, connectors) -> int:
         return _run_clear_osm_state(args, paths, connectors)
     if command == "osm-states":
         return _run_osm_states(args, paths)
+    if command == "set-coords":
+        return _run_set_coords(args, paths, connectors)
+    if command == "clear-coords":
+        return _run_clear_coords(args, paths, connectors)
+    if command == "coords":
+        return _run_manual_coords(args, paths)
+    if command == "research-worklist":
+        return _run_research_worklist(args, paths)
+    if command == "apply-research":
+        return _run_apply_research(args, paths, connectors)
     if command == "mark-unresolved":
         return _run_mark_unresolved(args, paths, connectors)
     if command == "audit":
@@ -286,6 +297,7 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     finally:
         conn.close()
     rules = place_core.load_rules(paths.place_rules_db)
+    manual_coords_count = len(identity.load_manual_coords(paths.place_identity_db))
     manual_merges = sum(1 for rule in rules if rule.action == "merge")
     standalone = sum(1 for rule in rules if rule.action == "standalone")
     print(f"Quell-Orte:        {counts['places']}")
@@ -296,6 +308,7 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     print(f"OSM-Konflikte:     {match_counts.get('conflict', 0)}")
     print(f"Adresspunkte:      {address_places}")
     print(f"OSM-Kandidaten:    {candidate_places}")
+    print(f"Manuelle Coords:   {manual_coords_count}")
     print(f"Ohne Vorschlag:    {without_suggestion}")
     for state in ("open", "no_osm", "closed", "no_coords", "ignored"):
         print(f"Status {state:<10} {state_counts.get(state, 0)}")
@@ -465,6 +478,109 @@ def _run_unmatched(args: argparse.Namespace, paths) -> int:
             f"{row['canonical_key']}  {row['name'] or '-'}  "
             f"[{row['city'] or '-'}, {row['match_status']}{suffix}{proposal}{state}]"
         )
+    return 0
+
+
+def _run_research_worklist(args: argparse.Namespace, paths) -> int:
+    states = tuple(args.state) if args.state else None
+    try:
+        rows = place_research.build_worklist(
+            paths,
+            source=args.source,
+            states=states,
+            limit=args.limit,
+        )
+    except FileNotFoundError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 1
+    if args.output:
+        output = Path(args.output)
+        place_research.write_worklist_csv(rows, output)
+        print(f"Worklist: {len(rows)} Orte -> {output}")
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+    elif not args.output:
+        for row in rows:
+            print(
+                f"{row['ref']}  {row['name']}  "
+                f"[{row.get('suggested_action')}] {row.get('suggestion_reason')}"
+            )
+    return 0
+
+
+def _run_apply_research(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        summary = place_research.apply_research(
+            paths, Path(args.csv), dry_run=args.dry_run
+        )
+    except FileNotFoundError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"Research: {summary.applied} angewendet, "
+        f"{summary.skipped} übersprungen, {len(summary.errors)} Fehler"
+    )
+    for message in summary.errors:
+        print(f"  {message}", file=sys.stderr)
+    if args.dry_run:
+        print("Dry-Run: keine Änderungen geschrieben.")
+    if summary.errors:
+        return 1
+    return 0 if args.no_build or args.dry_run else _rebuild_index(args, connectors)
+
+
+def _run_set_coords(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+        identity.set_manual_coords(
+            paths.place_identity_db,
+            source,
+            source_place_id,
+            args.lat,
+            args.lng,
+            note=args.note,
+        )
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    print(f"Koordinaten gespeichert: {args.place} -> {args.lat}, {args.lng}")
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_clear_coords(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    deleted = identity.delete_manual_coords(
+        paths.place_identity_db, source, source_place_id
+    )
+    print(
+        f"Koordinaten entfernt: {args.place}"
+        if deleted
+        else f"Keine manuellen Koordinaten vorhanden: {args.place}"
+    )
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_manual_coords(args: argparse.Namespace, paths) -> int:
+    rows = [
+        {"source": source, "source_place_id": place_id, **info}
+        for (source, place_id), info in sorted(
+            identity.load_manual_coords(paths.place_identity_db).items()
+        )
+        if not args.source or source == args.source
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    for row in rows:
+        print(
+            f"{row['source']}:{row['source_place_id']}  "
+            f"{row['lat']:.6f}, {row['lng']:.6f}  {row.get('note') or ''}"
+        )
+    print(f"Gesamt: {len(rows)}")
     return 0
 
 
@@ -824,6 +940,66 @@ def main(argv: list[str] | None = None) -> int:
     osm_states_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
     osm_states_parser.add_argument("--json", action="store_true")
     osm_states_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    set_coords_parser = place_commands.add_parser(
+        "set-coords", help="manuelle Koordinaten für einen Quell-Ort setzen"
+    )
+    set_coords_parser.add_argument("place", help="source:id des Quell-Orts")
+    set_coords_parser.add_argument("lat", type=float, help="Breitengrad")
+    set_coords_parser.add_argument("lng", type=float, help="Längengrad")
+    set_coords_parser.add_argument("--note", help="Notiz")
+    set_coords_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    set_coords_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    set_coords_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    clear_coords_parser = place_commands.add_parser(
+        "clear-coords", help="manuelle Koordinaten entfernen"
+    )
+    clear_coords_parser.add_argument("place", help="source:id des Quell-Orts")
+    clear_coords_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    clear_coords_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    clear_coords_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    coords_parser = place_commands.add_parser(
+        "coords", help="gesetzte manuelle Koordinaten anzeigen"
+    )
+    coords_parser.add_argument("--source", help="nur diese Quelle")
+    coords_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    coords_parser.add_argument("--json", action="store_true")
+    coords_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    worklist_parser = place_commands.add_parser(
+        "research-worklist",
+        help="Recherche-Worklist für eine Quelle als CSV ausgeben",
+    )
+    worklist_parser.add_argument("--source", default="yelp")
+    worklist_parser.add_argument(
+        "--state",
+        choices=identity.OSM_STATES,
+        action="append",
+        help="nur diese Stati (mehrfach erlaubt)",
+    )
+    worklist_parser.add_argument("--limit", type=int)
+    worklist_parser.add_argument("--output", help="Ziel-CSV")
+    worklist_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    worklist_parser.add_argument("--json", action="store_true")
+    worklist_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    apply_parser = place_commands.add_parser(
+        "apply-research",
+        help="Recherche-Entscheidungen aus CSV anwenden",
+    )
+    apply_parser.add_argument("csv", help="Entscheidungs-CSV")
+    apply_parser.add_argument("--dry-run", action="store_true")
+    apply_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    apply_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    apply_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     mark_parser = place_commands.add_parser(
         "mark-unresolved",

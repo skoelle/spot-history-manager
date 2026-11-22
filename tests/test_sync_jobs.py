@@ -19,6 +19,14 @@ ACTION_KEYS = {
     "google-import",
     "google-osm",
     "osm-sync",
+    "osm-rematch",
+    "osm-net-scan",
+    "osm-address-scan",
+    "osm-contact-scan",
+    "osm-deep-scan",
+    "yelp-worklist",
+    "yelp-apply-research",
+    "backup",
     "index-build",
     "index-thumbs",
 }
@@ -39,10 +47,43 @@ class ActionTests(unittest.TestCase):
             "google-import",
             "google-osm",
             "osm-sync",
+            "osm-rematch",
+            "osm-net-scan",
+            "osm-address-scan",
+            "osm-contact-scan",
+            "osm-deep-scan",
+            "yelp-apply-research",
         ):
             commands = sync_jobs.build_commands(action, Path("/data"))
             self.assertGreaterEqual(len(commands), 2, action)
             self.assertEqual(commands[-1], ["index", "build", "--data-root", "/data"])
+
+    def test_worklist_is_single_step(self):
+        commands = sync_jobs.build_commands("yelp-worklist", Path("/data"))
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0][:3], ["places", "research-worklist", "--source"])
+        self.assertIn("/data/exports/yelp-research.csv", commands[0])
+
+    def test_deep_scan_runs_backup_and_index(self):
+        commands = sync_jobs.build_commands("osm-deep-scan", Path("/data"))
+        self.assertEqual(commands[0], ["backup", "--keep-days", "3"])
+        self.assertEqual(commands[1][:2], ["osm", "deep-scan"])
+        self.assertEqual(commands[-1], ["index", "build", "--data-root", "/data"])
+
+    def test_apply_research_runs_backup_and_index(self):
+        commands = sync_jobs.build_commands("yelp-apply-research", Path("/data"))
+        self.assertEqual(commands[0], ["backup", "--keep-days", "3"])
+        self.assertIn(
+            "/data/exports/yelp-research-decisions.csv", commands[1]
+        )
+        self.assertIn("--no-build", commands[1])
+        self.assertEqual(commands[-1], ["index", "build", "--data-root", "/data"])
+
+    def test_backup_is_single_step(self):
+        self.assertEqual(
+            sync_jobs.build_commands("backup", Path("/data")),
+            [["backup", "--keep-days", "3"]],
+        )
 
     def test_index_thumbs_is_single_step(self):
         commands = sync_jobs.build_commands("index-thumbs", Path("/data"))
@@ -65,11 +106,18 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(grouped, ACTION_KEYS)
         self.assertEqual(
             [group["name"] for group in groups],
-            ["Foursquare", "Yelp", "Google", "OpenStreetMap", "Index"],
+            [
+                "Foursquare",
+                "Yelp",
+                "Google",
+                "OpenStreetMap",
+                "Index",
+                "Wartung",
+            ],
         )
         self.assertEqual(
             [group["key"] for group in groups],
-            ["foursquare", "yelp", "google", "osm", "index"],
+            ["foursquare", "yelp", "google", "osm", "index", "maintenance"],
         )
 
 

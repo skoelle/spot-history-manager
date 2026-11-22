@@ -19,7 +19,7 @@ from ..connectors.osm import db as osm_db
 from ..core import identity
 from ..core import places as place_core
 from ..core.config import build_paths
-from ..core.index import build_index
+from ..core.index import build_index, index_schema_ok
 from . import data as web_data
 from . import sync_jobs, sync_status
 
@@ -28,9 +28,27 @@ paths = build_paths(os.environ.get("SPOT_HISTORY_DATA_ROOT"))
 os.environ.setdefault("SPOT_HISTORY_DB_ROOT", str(paths.db_root))
 sync_runner = sync_jobs.JobRunner()
 
+def ensure_index_schema(log=print) -> None:
+    if os.environ.get("SPOT_HISTORY_SKIP_STARTUP_INDEX", "").strip() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+    if index_schema_ok(paths.index_db):
+        return
+    log("Index: Schema veraltet oder Index fehlt, baue Index neu ...")
+    try:
+        summary = build_index(discover(), paths, log=log)
+    except Exception as exc:  # noqa: BLE001 - Start darf nicht hart scheitern
+        log(f"Index: automatischer Rebuild fehlgeschlagen ({exc})")
+        return
+    log(f"Index: automatischer Rebuild fertig ({summary['canonical_places']} Orte)")
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    ensure_index_schema()
     yield
     sync_runner.shutdown()
 

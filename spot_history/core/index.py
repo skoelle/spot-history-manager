@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from ..connectors.base import BaseConnector
 from .config import Paths
 from .identity import (
     load_aliases,
+    load_manual_coords,
     load_osm_assignments,
     load_osm_candidate_keys,
     load_osm_states,
@@ -42,6 +44,10 @@ def effective_coords(row) -> tuple[float, float, str]:
     osm_lng = row["osm_lng"]
     if osm_lat is not None and osm_lng is not None:
         return osm_lat, osm_lng, "osm"
+    manual_lat = row["manual_lat"] if "manual_lat" in row.keys() else None  # noqa: SIM118
+    manual_lng = row["manual_lng"] if "manual_lng" in row.keys() else None  # noqa: SIM118
+    if manual_lat is not None and manual_lng is not None:
+        return manual_lat, manual_lng, "manual"
     return row["source_lat"], row["source_lng"], "source"
 
 
@@ -63,6 +69,12 @@ def feature_for_row(row, photos: list[str], sources: list[str] | None = None) ->
             "lng": row["source_lng"],
             "osm_lat": row["osm_lat"],
             "osm_lng": row["osm_lng"],
+            "manual_lat": (
+                row["manual_lat"] if "manual_lat" in row.keys() else None  # noqa: SIM118
+            ),
+            "manual_lng": (
+                row["manual_lng"] if "manual_lng" in row.keys() else None  # noqa: SIM118
+            ),
             "coords_source": coords_source,
             "category": row["category"],
             "category_group": row["category_group"],
@@ -175,6 +187,8 @@ CREATE TABLE canonical_places (
     osm_id INTEGER,
     osm_lat REAL,
     osm_lng REAL,
+    manual_lat REAL,
+    manual_lng REAL,
     match_status TEXT NOT NULL DEFAULT 'local',
     place_kind TEXT NOT NULL DEFAULT 'venue',
     has_osm_candidate INTEGER NOT NULL DEFAULT 0,
@@ -270,6 +284,23 @@ CREATE TABLE index_meta (
     value TEXT
 );
 """
+
+
+INDEX_REQUIRED_COLUMNS = {"place_state", "manual_lat", "manual_lng"}
+
+
+def index_schema_ok(path: Path) -> bool:
+    if not path.exists():
+        return False
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute("PRAGMA table_info(canonical_places)").fetchall()
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        conn.close()
+    columns = {row[1] for row in rows}
+    return INDEX_REQUIRED_COLUMNS.issubset(columns)
 
 
 def build_index(
@@ -436,6 +467,7 @@ def build_index(
         osm_cities = load_osm_cities(paths.osm_db)
         osm_candidate_keys = load_osm_candidate_keys(paths.place_identity_db)
         osm_states = load_osm_states(paths.place_identity_db)
+        manual_coords = load_manual_coords(paths.place_identity_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
@@ -501,6 +533,13 @@ def build_index(
             has_osm_candidate = int(
                 any(member.key in osm_candidate_keys for member in canonical.members)
             )
+            manual_lat = manual_lng = None
+            for member in canonical.sorted_members:
+                manual = manual_coords.get(member.key)
+                if manual:
+                    manual_lat = manual["lat"]
+                    manual_lng = manual["lng"]
+                    break
             place_state = "open"
             place_state_reason = None
             for member in canonical.sorted_members:
@@ -517,10 +556,11 @@ def build_index(
                 "category, category_group, category_group_source, address, "
                 "city, state, postal_code, country_code, primary_source, "
                 "sources_json, source_count, osm_type, osm_id, osm_lat, osm_lng, "
+                "manual_lat, manual_lng, "
                 "match_status, place_kind, has_osm_candidate, place_state, "
                 "place_state_reason) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                "?, ?, ?, ?, ?)",
+                "?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
                     canonical.name,
@@ -541,6 +581,8 @@ def build_index(
                     canonical.osm_id,
                     osm_lat,
                     osm_lng,
+                    manual_lat,
+                    manual_lng,
                     canonical.match_status,
                     canonical.place_kind,
                     has_osm_candidate,
@@ -669,8 +711,8 @@ def build_index(
             "UPDATE visits SET coords_derived = CASE "
             "WHEN has_coords = 0 AND canonical_place_id IS NOT NULL AND EXISTS ("
             "SELECT 1 FROM canonical_places p WHERE p.id = visits.canonical_place_id "
-            "AND COALESCE(p.osm_lat, p.lat) IS NOT NULL "
-            "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL) "
+            "AND COALESCE(p.osm_lat, p.manual_lat, p.lat) IS NOT NULL "
+            "AND COALESCE(p.osm_lng, p.manual_lng, p.lng) IS NOT NULL) "
             "THEN 1 ELSE 0 END"
         )
         photo_paths: dict[int, list[str]] = {}
@@ -685,12 +727,13 @@ def build_index(
             "v.note, v.source_url, v.has_coords, v.coords_derived, "
             "p.id AS place_id, p.canonical_key AS place_key, p.name AS place_name, "
             "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
+            "p.manual_lat, p.manual_lng, "
             "p.osm_type, p.osm_id, p.match_status, "
             "p.category, p.category_group, p.category_group_source, "
             "p.address, p.city, p.state, p.country_code, p.sources_json "
             "FROM visits v JOIN canonical_places p ON p.id = v.canonical_place_id "
-            "WHERE COALESCE(p.osm_lat, p.lat) IS NOT NULL "
-            "AND COALESCE(p.osm_lng, p.lng) IS NOT NULL "
+            "WHERE COALESCE(p.osm_lat, p.manual_lat, p.lat) IS NOT NULL "
+            "AND COALESCE(p.osm_lng, p.manual_lng, p.lng) IS NOT NULL "
             "ORDER BY v.visited_at"
         ):
             sources = json.loads(visit_row["sources_json"]) if visit_row["sources_json"] else None

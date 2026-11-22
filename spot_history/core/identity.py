@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS place_osm_state (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (source, source_place_id)
 );
+
+CREATE TABLE IF NOT EXISTS place_manual_coords (
+    source TEXT NOT NULL,
+    source_place_id TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    note TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, source_place_id)
+);
 """
 
 
@@ -413,6 +423,80 @@ def delete_osm_state(path: Path, source: str, source_place_id: str) -> bool:
         with conn:
             cursor = conn.execute(
                 "DELETE FROM place_osm_state WHERE source=? AND source_place_id=?",
+                (source, source_place_id),
+            )
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_manual_coords(
+    path: Path,
+    source: str,
+    source_place_id: str,
+    lat: float,
+    lng: float,
+    *,
+    note: str | None = None,
+) -> None:
+    try:
+        clean_lat = float(lat)
+        clean_lng = float(lng)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Ungültige Koordinaten: {lat!r}, {lng!r}") from exc
+    if not (-90.0 <= clean_lat <= 90.0 and -180.0 <= clean_lng <= 180.0):
+        raise ValueError(f"Koordinaten außerhalb des gültigen Bereichs: {lat}, {lng}")
+    stamp = now_iso()
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO place_manual_coords "
+                "(source, source_place_id, lat, lng, note, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, source_place_id) DO UPDATE SET "
+                "lat=excluded.lat, lng=excluded.lng, note=excluded.note, "
+                "updated_at=excluded.updated_at",
+                (source, source_place_id, clean_lat, clean_lng, note, stamp),
+            )
+    finally:
+        conn.close()
+
+
+def load_manual_coords(path: Path) -> dict[tuple[str, str], dict]:
+    conn = _read_connection(path)
+    if conn is None:
+        return {}
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT source, source_place_id, lat, lng, note, updated_at "
+                "FROM place_manual_coords"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    return {
+        (row["source"], row["source_place_id"]): {
+            "lat": float(row["lat"]),
+            "lng": float(row["lng"]),
+            "note": row["note"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    }
+
+
+def delete_manual_coords(path: Path, source: str, source_place_id: str) -> bool:
+    if not path.exists():
+        return False
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM place_manual_coords "
+                "WHERE source=? AND source_place_id=?",
                 (source, source_place_id),
             )
         return cursor.rowcount > 0

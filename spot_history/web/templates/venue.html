@@ -41,7 +41,8 @@
             {% if venue.lat is not none and venue.lng is not none %}
             <span {% if venue.coords_source == 'osm' and venue.source_lat is not none %}title="Quellkoordinate: {{ '%.5f'|format(venue.source_lat) }}, {{ '%.5f'|format(venue.source_lng) }}"{% endif %}>
                 {{ "%.5f"|format(venue.lat) }}, {{ "%.5f"|format(venue.lng) }}
-                {% if venue.coords_source == 'osm' %}<span class="badge">OSM</span>{% endif %}
+                {% if venue.coords_source == 'osm' %}<span class="badge">OSM</span>
+                {% elif venue.coords_source == 'manual' %}<span class="badge derived">manuell</span>{% endif %}
             </span>
             {% endif %}
             {% if venue.place_kind == 'address' %}<span class="badge derived">Adresse</span>{% endif %}

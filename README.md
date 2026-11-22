@@ -179,6 +179,61 @@ with a reverse proxy if it is exposed. For Google imports, place the export in
 the path inside the container. The Yelp import expects the export in
 `data/yelp/export` or at `YELP_EXPORT_DIR`.
 
+Additional maintenance actions are available on the Sync page:
+
+- OpenStreetMap: rematch, network scan, address scan, contact scan, deep scan
+- Yelp: research worklist and apply reviewed research decisions
+- Maintenance: create a backup
+
+The deep scan and research import run a backup first and rebuild the index
+afterwards.
+
+### 🧰 One-off commands and updates in the container
+
+Run one-off jobs with the same image and mounts:
+
+```bash
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history places stats
+```
+
+Long scans and `index build` should run while the web container is stopped, so
+the UI never reads a half-rebuilt index:
+
+```bash
+docker compose stop spot-history-manager
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history osm deep-scan
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history index build
+docker compose up -d
+```
+
+`deploy/update.sh` automates a safe update: pull the image, back up the
+databases, rebuild the index, then start the service. Configure the Synology
+webhook to call this script if it supports host commands; if it only pulls and
+recreates the container, the web server detects an outdated index schema on
+startup and rebuilds the index automatically.
+
+For the Yelp research campaign:
+
+```bash
+# Production worklist (inside the container)
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history places research-worklist --source yelp \
+  --output /app/data/exports/yelp-research.csv
+
+# After reviewing and writing decisions via the NAS share:
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history places apply-research \
+  /app/data/exports/yelp-research-decisions.csv --dry-run
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history places apply-research \
+  /app/data/exports/yelp-research-decisions.csv
+docker compose run --rm --no-deps spot-history-manager \
+  python -m spot_history index build
+```
+
 ## 🗂️ Data layout
 
 ```
@@ -507,6 +562,14 @@ python3 -m spot_history places osm-state foursquare:<venue_id> no_osm --note "..
 python3 -m spot_history places osm-state-clear foursquare:<venue_id>
 python3 -m spot_history places osm-states
 python3 -m spot_history places mark-unresolved --state no_osm --dry-run
+
+# Manual research and coordinate backfill
+python3 -m spot_history places research-worklist --source yelp \
+  --output data/exports/yelp-research.csv
+python3 -m spot_history places apply-research \
+  data/exports/yelp-research-decisions.csv --dry-run
+python3 -m spot_history places set-coords yelp:<place_key> 48.1372 11.5755
+python3 -m spot_history places clear-coords yelp:<place_key>
 ```
 
 - `osm sync` only reads the index and writes exclusively to `db/osm/osm.db`
@@ -544,6 +607,13 @@ python3 -m spot_history places mark-unresolved --state no_osm --dry-run
   `ignored` per source place; the index exposes this as `place_state` and the UI
   has status filters. `places mark-unresolved` can bulk-mark the remaining open
   venues without OSM ID and candidate (default `no_osm`).
+- `places research-worklist` writes a CSV with candidates, same-day visit
+  context, Yelp bookmark URLs and suggested actions. `places apply-research`
+  applies the reviewed decisions (`assign`, `merge`, `state`, `coords`) in one
+  run; use `--dry-run` first.
+- `places set-coords` stores manual coordinates for venues without an OSM
+  object. The index exposes them as `manual_lat/manual_lng`; coordinate
+  priority is OSM > manual > source, and the UI shows a "manuell" badge.
 - `--force` ignores the query cache; `--dry-run` only matches and writes no
   assignments. The place list has filters for place kind (venue/address) and
   "without OSM suggestion".
