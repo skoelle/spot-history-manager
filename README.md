@@ -69,7 +69,9 @@ python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
 ```
 
 Foursquare connector options: `--data-dir`, `--db`, `--sleep`, `--no-photos`,
-`--no-export`, `--verbose`. `probe` is read-only and writes no data. The web
+`--paid`, `--no-export`, `--verbose`. `probe` is read-only and writes no data.
+`--paid` enables the credit-based endpoints (photo metadata, venue history, list
+details); without it the automatic sync only uses the free endpoints. The web
 interface only reads the index; run `index build` separately beforehand.
 
 ## 🐳 Docker
@@ -567,12 +569,18 @@ python3 -m spot_history places mark-unresolved --state no_osm --dry-run
 - Comment texts are loaded via `/v2/checkins/<id>/comments`
 - The sync state (`last_max_created_at`) is stored in `sync_state`; `sync` only
   fetches new items and rewrites the exports
-- Also imported: `venuehistory` (1029 of 1051 API venues), `lists` (5 lists,
-  150 list entries; 53 of 54 for "My Liked Places"), `tips` (11, including
-  details such as language, saves, and title), and all user photos (577; 562 with
-  check-in, 15 standalone)
+- Also previously imported: `venuehistory` (1029 of 1051 API venues), `lists`
+  (5 lists, 150 list entries; 53 of 54 for "My Liked Places"), `tips` (11,
+  including details such as language, saves, and title), and all user photos
+  (577; 562 with check-in, 15 standalone)
+- Premium endpoints are **disabled by default**: `users/self/photos`,
+  `users/self/venuehistory`, and `lists/{id}` require credits. Run
+  `foursquare sync --paid` (or `backfill --paid`) to refresh them; the existing
+  data stays available when they are disabled.
 - The missing entries (22 venues, 1 list entry) are not delivered even with
   alternative offset strategies and are documented in `sync_diagnostics`.
+- When premium sync is disabled, `sync_diagnostics` marks photos, venue history,
+  and list items as "Premium-API deaktiviert" instead of reporting them as gaps.
 - Tastes (`/v2/users/self/tastes`, 17 entries) and tip details (`/v2/tips/<id>`)
   are stored completely, including raw JSON
 - User profile including counters and a locally stored avatar
@@ -593,9 +601,9 @@ python3 -m spot_history places mark-unresolved --state no_osm --dry-run
   calls, and does not overwrite existing venue snapshots.
 - The `/venues/{id}` detail page shows phone, website, email, social links, all
   categories, and the data timestamp from it; empty fields are hidden.
-- Quota note: the one-time fetch of all 1036 venues exhausted the freePro quota;
-  further detail calls return 429 until the reset/credits. Importing from JSON
-  consumes no quota.
+- Quota note: the free quota is permanently exhausted; there is no automatic
+  reset anymore. Further premium calls require purchased credits and return 402
+  otherwise. Importing the saved JSON baseline consumes no quota.
 - `places/search`, `autocomplete`, `places/match`, and `geotagging/candidates`
   respond with 200, `places/resolve` with 401 (missing permission).
 - `foursquare probe` checks the account endpoints read-only; `friends`/`badges`
@@ -749,7 +757,9 @@ python3 -m unittest discover -s tests
 
 - `.env`, `data/`, and `db/` are gitignored and must not be committed.
 - The raw JSON also contains names of users who liked check-ins.
-- Photos are loaded at original resolution; `--no-photos` skips this.
+- Photos are loaded at original resolution; `--no-photos` skips downloads.
+  Photo **metadata** comes from the premium photos endpoint and is only refreshed
+  with `--paid`.
 - The Google Timeline export remains manual (iOS share sheet); `google.sh` then
   handles import, OSM enrichment, and index rebuild.
 - No app-internal cron/daemon: sync and index builds are started manually via

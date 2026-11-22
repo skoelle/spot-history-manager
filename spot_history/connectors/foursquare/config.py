@@ -28,6 +28,7 @@ class FoursquareConfig:
     timeout: float = 60.0
     retries: int = 4
     download_photos: bool = True
+    paid_extras: bool = False
     export: bool = True
     verbose: bool = False
 
@@ -51,6 +52,7 @@ def build_config(
     db_path: str | Path | None = None,
     sleep: float | None = None,
     download_photos: bool = True,
+    paid_extras: bool = False,
     export: bool = True,
     verbose: bool = False,
     require_token: bool = True,
@@ -80,6 +82,7 @@ def build_config(
         service_api_key=os.environ.get("FOURSQUARE_SERVICE_API_KEY", "").strip(),
         sleep=0.3 if sleep is None else sleep,
         download_photos=download_photos,
+        paid_extras=paid_extras,
         export=export,
         verbose=verbose,
     )

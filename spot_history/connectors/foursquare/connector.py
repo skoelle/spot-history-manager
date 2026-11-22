@@ -28,6 +28,11 @@ class FoursquareConnector(BaseConnector):
         common.add_argument("--db", help="Pfad zur SQLite-Datei")
         common.add_argument("--sleep", type=float, help="Pause zwischen API-Requests")
         common.add_argument("--no-photos", action="store_true", help="keine Bilddateien laden")
+        common.add_argument(
+            "--paid",
+            action="store_true",
+            help="kostenpflichtige Premium-Endpunkte abrufen (Fotos, Venue-History, Listendetails)",
+        )
         common.add_argument("--no-export", action="store_true", help="keine JSON/CSV-Exporte")
         common.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
 
@@ -61,6 +66,7 @@ class FoursquareConnector(BaseConnector):
             db_path=args.db,
             sleep=args.sleep,
             download_photos=not args.no_photos,
+            paid_extras=args.paid,
             export=not args.no_export,
             verbose=args.verbose,
             require_token=args.command != "venue-import",

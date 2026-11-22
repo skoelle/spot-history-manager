@@ -149,6 +149,7 @@ class ExtrasTest(unittest.TestCase):
             token="dummy",
             data_dir=Path(self.tmp.name),
             download_photos=False,
+            paid_extras=True,
             export=False,
             sleep=0,
         )
@@ -387,6 +388,79 @@ class ExtrasTest(unittest.TestCase):
         }
         self.sync.sync_extras()
         self.assertEqual(self.db.stats()["venue_history"], 1)
+
+    def _free_sync(self, logs: list[str] | None = None) -> Sync:
+        cfg = FoursquareConfig(
+            token="dummy",
+            data_dir=Path(self.tmp.name),
+            download_photos=False,
+            paid_extras=False,
+            export=False,
+            sleep=0,
+        )
+        target = logs if logs is not None else []
+        return Sync(self.api, self.db, cfg, log=target.append)
+
+    def test_paid_extras_are_skipped_by_default(self):
+        self.api.list_payload = [
+            {
+                "id": "185614/todos",
+                "name": "My Saved Places",
+                "listItems": {"count": 2},
+            }
+        ]
+        self.api.list_detail_payload["185614/todos"] = {
+            "id": "185614/todos",
+            "listItems": {
+                "count": 2,
+                "items": [{"venue": {"id": "v1", "name": "A"}}],
+            },
+        }
+        logs: list[str] = []
+
+        self._free_sync(logs).sync_extras()
+
+        self.assertEqual(self.api.photo_offsets, [])
+        self.assertEqual(self.api.venue_offsets, [])
+        self.assertEqual(self.api.list_detail_calls, [])
+        self.assertEqual(self.db.stats()["lists"], 1)
+        self.assertEqual(self.db.stats()["list_items"], 0)
+        self.assertTrue(any("Premium-Extras: deaktiviert" in line for line in logs))
+
+    def test_lists_without_details_when_paid_disabled(self):
+        self.api.list_payload = [
+            {
+                "id": "185614/todos",
+                "name": "My Saved Places",
+                "listItems": {"count": 2},
+            }
+        ]
+        logs: list[str] = []
+
+        stored = self._free_sync(logs).sync_lists()
+
+        self.assertEqual(stored, 1)
+        self.assertEqual(self.api.list_detail_calls, [])
+        self.assertEqual(self.db.stats()["list_items"], 0)
+        self.assertTrue(
+            any("Listen: 1 gespeichert (Details deaktiviert)" in line for line in logs)
+        )
+
+    def test_diagnostics_mark_disabled_paid_extras(self):
+        self.db.set_state("photos_api_total", 4)
+        self.db.set_state("venue_history_total", 3)
+
+        self._free_sync().write_diagnostics()
+
+        diagnostics = {row["scope"]: row for row in self.db.diagnostics()}
+        self.assertEqual(diagnostics["photos"]["note"], "Premium-API deaktiviert")
+        self.assertEqual(
+            diagnostics["venue_history"]["note"], "Premium-API deaktiviert"
+        )
+        self.assertEqual(
+            diagnostics["list_items"]["note"],
+            "Premium-API deaktiviert (Listendetails)",
+        )
 
     def test_probe_status_mapping(self):
         self.assertEqual(CONNECTOR._probe_status(ApiError("402: Credits exhausted")), "402")

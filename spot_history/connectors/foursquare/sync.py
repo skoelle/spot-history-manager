@@ -189,15 +189,27 @@ class Sync:
         return comments, photos
 
     def sync_extras(self) -> None:
-        for name, func in (
+        extras: list[tuple[str, Callable[[], object]]] = [
             ("Profil", self.sync_profile),
-            ("Fotos", self.sync_all_photos),
-            ("Venue-History", self.sync_venue_history),
-            ("Listen", self.sync_lists),
-            ("Tipps", self.sync_tips),
-            ("Tip-Details", self.sync_tip_details),
-            ("Tastes", self.sync_tastes),
-        ):
+        ]
+        if self.cfg.paid_extras:
+            extras.extend(
+                [
+                    ("Fotos", self.sync_all_photos),
+                    ("Venue-History", self.sync_venue_history),
+                ]
+            )
+        else:
+            self.log("Premium-Extras: deaktiviert (--paid zum Aktivieren)")
+        extras.extend(
+            [
+                ("Listen", self.sync_lists),
+                ("Tipps", self.sync_tips),
+                ("Tip-Details", self.sync_tip_details),
+                ("Tastes", self.sync_tastes),
+            ]
+        )
+        for name, func in extras:
             try:
                 func()
             except AuthError:
@@ -287,6 +299,9 @@ class Sync:
     def sync_lists(self) -> int:
         items = self.api.lists(limit=LIST_PAGE_LIMIT)
         stored = self.db.upsert_lists(items)
+        if not self.cfg.paid_extras:
+            self.log(f"Listen: {stored} gespeichert (Details deaktiviert)")
+            return stored
         self.log(f"Listen: {stored} gespeichert")
         for raw in items:
             item = raw.get("list") if isinstance(raw.get("list"), dict) else raw
@@ -412,27 +427,39 @@ class Sync:
         photos_api = self.db.get_int_state("photos_api_total")
         photos_unique = self.db.get_int_state("photos_unique_total")
         note = None
-        if photos_unique and photos_api and photos_unique != photos_api:
+        if not self.cfg.paid_extras:
+            note = "Premium-API deaktiviert"
+        elif photos_unique and photos_api and photos_unique != photos_api:
             note = f"{photos_unique} eindeutige API-IDs"
         self.db.set_diagnostic(
             "photos", photos_api or None, stats["photos_total"], note
         )
 
         venue_api = self.db.get_int_state("venue_history_total")
+        if not self.cfg.paid_extras:
+            venue_note = "Premium-API deaktiviert"
+        elif venue_api and stats["venue_history"] < venue_api:
+            venue_note = "API liefert weniger als count"
+        else:
+            venue_note = None
         self.db.set_diagnostic(
             "venue_history",
             venue_api or None,
             stats["venue_history"],
-            "API liefert weniger als count"
-            if venue_api and stats["venue_history"] < venue_api else None,
+            venue_note,
         )
         list_api = self.db.list_items_api_count()
+        if not self.cfg.paid_extras:
+            list_note = "Premium-API deaktiviert (Listendetails)"
+        elif list_api and stats["list_items"] < list_api:
+            list_note = "API liefert weniger als count"
+        else:
+            list_note = None
         self.db.set_diagnostic(
             "list_items",
             list_api or None,
             stats["list_items"],
-            "API liefert weniger als count"
-            if list_api and stats["list_items"] < list_api else None,
+            list_note,
         )
         self.db.set_diagnostic(
             "tips",
