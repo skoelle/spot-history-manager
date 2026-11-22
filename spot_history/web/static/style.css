@@ -1287,3 +1287,118 @@ button:hover,
         min-height: 260px;
     }
 }
+
+[hidden] {
+    display: none !important;
+}
+
+.sync-layout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.sync-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.sync-description {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.sync-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    margin-top: 0.25rem;
+}
+
+.sync-action {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+}
+
+.sync-action-desc {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.sync-status-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.sync-status-head .box-title {
+    margin-bottom: 0;
+}
+
+.sync-status-body {
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    color: #333;
+}
+
+.sync-status-body span {
+    margin-right: 0.75rem;
+}
+
+.sync-state {
+    font-weight: 600;
+}
+
+.sync-state.running {
+    color: var(--accent);
+}
+
+.sync-state.success {
+    color: #1a7f37;
+}
+
+.sync-state.error {
+    color: #b42318;
+}
+
+.sync-state.cancelled {
+    color: #8a6d3b;
+}
+
+.sync-steps {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.sync-step code {
+    background: #f0f0f0;
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    word-break: break-word;
+}
+
+.sync-log {
+    margin: 1rem 0 0;
+    padding: 0.75rem 1rem;
+    max-height: 22rem;
+    overflow: auto;
+    background: #111;
+    color: #ddd;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

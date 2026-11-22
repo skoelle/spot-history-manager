@@ -90,7 +90,29 @@ that user. The web UI has no authentication; put it behind a reverse proxy if
 you expose it.
 
 For a persistent deployment, copy `docker-compose.example.yml` to
-`docker-compose.yml` and adjust the volume path.
+`docker-compose.yml` and adjust the volume path. The image does not contain a
+`.env`; Compose interpolates the tokens from the `.env` file next to
+`docker-compose.yml` and passes them into the container.
+
+### 🔄 Sync buttons in the web UI
+
+The **Sync** page (`/sync`) starts jobs directly inside the container:
+
+- Foursquare: incremental sync, full backfill, pending photo downloads
+- Google: Timeline import from `data/google/inbox` (or `GOOGLE_TIMELINE_INBOX`),
+  OSM enrichment
+- OpenStreetMap: `osm sync`
+- Index: rebuild, thumbnails
+
+Each sync job automatically runs `index build` afterwards, so the web UI shows
+new data immediately. Only one job runs at a time; the page shows status,
+duration, a log excerpt, and a cancel button. Logs are also written to
+`data/sync/logs/`.
+
+There is no automatic schedule. The web UI has no authentication, so protect it
+with a reverse proxy if it is exposed. For Google imports, place the export in
+`data/google/inbox` or mount it separately and point `GOOGLE_TIMELINE_INBOX` to
+the path inside the container.
 
 ## 🗂️ Data layout
 
@@ -593,7 +615,8 @@ python3 -m unittest discover -s tests
 - Photos are loaded at original resolution; `--no-photos` skips this.
 - The Google Timeline export remains manual (iOS share sheet); `google.sh` then
   handles import, OSM enrichment, and index rebuild.
-- No cron/daemon: sync and index builds are invoked manually.
+- No cron/daemon: sync and index builds are started manually via the CLI or the
+  Sync page in the web UI.
 
 ## 📄 License
 

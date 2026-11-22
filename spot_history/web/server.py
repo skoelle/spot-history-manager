@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
@@ -20,11 +21,20 @@ from ..core import places as place_core
 from ..core.config import build_paths
 from ..core.index import build_index
 from . import data as web_data
+from . import sync_jobs
 
 BASE = Path(__file__).resolve().parent
 paths = build_paths(os.environ.get("SPOT_HISTORY_DATA_ROOT"))
+sync_runner = sync_jobs.JobRunner()
 
-app = FastAPI(title="Spot History", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    sync_runner.shutdown()
+
+
+app = FastAPI(title="Spot History", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
@@ -879,6 +889,55 @@ def google_activity(request: Request) -> HTMLResponse:
             "groups": groups,
         },
     )
+
+
+@app.get("/sync", response_class=HTMLResponse)
+def sync_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "sync.html",
+        {
+            "request": request,
+            "groups": sync_jobs.action_groups(paths.data_root),
+            "data_root": str(paths.data_root),
+        },
+    )
+
+
+@app.post("/api/sync/start/{action}")
+def start_sync(request: Request, action: str) -> dict:
+    _check_same_origin(request)
+    try:
+        sync_runner.start(paths.data_root, action)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unbekannte Sync-Aktion")
+    except sync_jobs.JobBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return sync_runner.status()
+
+
+@app.post("/sync/{action}")
+def start_sync_form(request: Request, action: str) -> RedirectResponse:
+    _check_same_origin(request)
+    try:
+        sync_runner.start(paths.data_root, action)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unbekannte Sync-Aktion")
+    except sync_jobs.JobBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return RedirectResponse("/sync", status_code=303)
+
+
+@app.get("/api/sync/status")
+def sync_status() -> dict:
+    return sync_runner.status()
+
+
+@app.post("/api/sync/stop")
+def stop_sync(request: Request) -> dict:
+    _check_same_origin(request)
+    stopped = sync_runner.stop()
+    return {"stopped": stopped, **sync_runner.status()}
 
 
 @app.get("/media/{path:path}")

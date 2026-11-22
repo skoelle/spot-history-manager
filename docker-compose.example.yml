@@ -2,14 +2,27 @@
 # The container runs as UID/GID 1000; the mounted data directory must be
 # writable by that user. Do not set SPOT_HISTORY_DATA_ROOT: the app expects its
 # data at /app/data inside the image.
+#
+# Tokens are interpolated from the .env file next to this compose file:
+#   FOURSQUARE_OAUTH_TOKEN=...
+#   FOURSQUARE_SERVICE_API_KEY=...
 services:
   spot-history-manager:
     image: ghcr.io/skoelle/spot-history-manager:latest
     container_name: spot-history-manager
     restart: unless-stopped
+    init: true
     ports:
       - "8345:8345"
     volumes:
       - ./data:/app/data
+      # Optional: Google-Timeline-Datei von außen einbinden und
+      # GOOGLE_TIMELINE_INBOX auf den Pfad im Container setzen.
+      # - ./imports/google:/app/imports/google:ro
     environment:
       TZ: Europe/Berlin
+      FOURSQUARE_OAUTH_TOKEN: ${FOURSQUARE_OAUTH_TOKEN:-}
+      FOURSQUARE_SERVICE_API_KEY: ${FOURSQUARE_SERVICE_API_KEY:-}
+      FOURSQUARE_LEGACY_API_KEY: ${FOURSQUARE_LEGACY_API_KEY:-}
+      # Default ist /app/data/google/inbox:
+      # GOOGLE_TIMELINE_INBOX: /app/imports/google

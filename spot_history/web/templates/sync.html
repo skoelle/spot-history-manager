@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de) -->
+<!-- Licensed under the MIT License. See LICENSE file in project root for details. -->
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <title>Sync – Spot History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set active_page = 'sync' %}
+{% set header_meta %}Sync{% endset %}
+<div class="container">
+    {% include "_header.html" %}
+
+    <p class="hint">
+        Startet Syncs direkt im Container. Nach jedem Sync wird der Index automatisch neu gebaut.
+        Es läuft immer nur ein Job gleichzeitig. Die Web-UI hat keine Authentifizierung – bei
+        öffentlicher Erreichbarkeit bitte einen Reverse Proxy mit Zugriffsschutz davor setzen.
+    </p>
+
+    <div class="sync-layout">
+        {% for group in groups %}
+        <div class="box sync-card">
+            <div class="box-title">{{ group.name }}</div>
+            {% if group.hint %}<p class="sync-description">{{ group.hint }}</p>{% endif %}
+            <div class="sync-actions">
+                {% for action in group.actions %}
+                <div class="sync-action">
+                    <button type="button"
+                            class="button{% if action.confirm %} danger{% endif %}"
+                            data-sync-action="{{ action.key }}"
+                            {% if action.confirm %}data-confirm="{{ action.confirm }}"{% endif %}>
+                        {{ action.label }}
+                    </button>
+                    <p class="sync-action-desc">{{ action.description }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="box sync-status"
+         id="sync-status"
+         data-status-url="/api/sync/status"
+         data-start-url="/api/sync/start/"
+         data-stop-url="/api/sync/stop">
+        <div class="sync-status-head">
+            <div class="box-title">Status</div>
+            <button type="button" class="button danger" id="sync-stop" hidden>Abbrechen</button>
+        </div>
+        <div class="sync-status-body" id="sync-status-body">
+            <span class="sync-state">Kein Job aktiv.</span>
+        </div>
+        <pre class="sync-log" id="sync-log" hidden></pre>
+        <p class="sync-action-desc">Logs: <code>{{ data_root }}/sync/logs</code></p>
+    </div>
+
+    <noscript>
+        <div class="empty-state">
+            Die Sync-Buttons benötigen JavaScript. Alternativ per CLI starten, z. B.
+            <code>python -m spot_history foursquare sync</code>.
+        </div>
+    </noscript>
+</div>
+<script src="/static/sync.js" defer></script>
+</body>
+</html>
