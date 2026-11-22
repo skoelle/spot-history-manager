@@ -930,6 +930,51 @@ class WebDataTest(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_manual_name_reclassifies_address_as_venue(self):
+        class AddressNamedConnector(BaseConnector):
+            name = "fake"
+            kind = "import"
+
+            def iter_visits(self):
+                yield Visit(
+                    source="fake",
+                    source_visit_id="a1",
+                    visited_at=1700000000,
+                    lat=48.1,
+                    lng=11.5,
+                    place_name="Teststraße 1",
+                    source_place_id="a1",
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index(
+                {"fake": AddressNamedConnector()}, paths, log=lambda _: None
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                row = conn.execute(
+                    "SELECT name, place_kind FROM canonical_places"
+                ).fetchone()
+                self.assertEqual(row["place_kind"], "address")
+            finally:
+                conn.close()
+            set_manual_name(
+                paths.place_identity_db, "fake", "a1", "Backstage"
+            )
+            build_index(
+                {"fake": AddressNamedConnector()}, paths, log=lambda _: None
+            )
+            conn = web_data.connect(paths.index_db)
+            try:
+                row = conn.execute(
+                    "SELECT name, place_kind FROM canonical_places"
+                ).fetchone()
+                self.assertEqual(row["name"], "Backstage")
+                self.assertEqual(row["place_kind"], "venue")
+            finally:
+                conn.close()
+
     def test_osm_filter_after_manual_assignment(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = build_paths(tmp)

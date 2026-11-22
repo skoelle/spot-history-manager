@@ -24,6 +24,7 @@ from .osm_coords import load_osm_cities, load_osm_coords
 from .places import (
     collect_source_places,
     load_rules,
+    looks_like_address,
     resolve_canonical_places,
 )
 from .timezones import apply_timezone_offsets
@@ -525,6 +526,7 @@ def build_index(
             state: 0
             for state in ("open", "no_osm", "closed", "no_coords", "ignored")
         }
+        kind_counts = {"venue": 0, "address": 0}
         for canonical in canonical_places:
             lat, lng = canonical.coords
             osm_lat = osm_lng = None
@@ -545,11 +547,18 @@ def build_index(
                     manual_lng = manual["lng"]
                     break
             name_override = canonical.name
+            has_name_override = False
             for member in canonical.sorted_members:
                 manual_name = manual_names.get(member.key)
                 if manual_name:
                     name_override = manual_name["name"]
+                    has_name_override = True
                     break
+            effective_place_kind = canonical.place_kind
+            if has_name_override:
+                effective_place_kind = (
+                    "address" if looks_like_address(name_override) else "venue"
+                )
             address_override = canonical.address
             city_override = canonical.city
             postal_override = canonical.postal_code
@@ -573,6 +582,9 @@ def build_index(
                     )
                     break
             state_counts[place_state] = state_counts.get(place_state, 0) + 1
+            kind_counts[effective_place_kind] = (
+                kind_counts.get(effective_place_kind, 0) + 1
+            )
             cursor = conn.execute(
                 "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
                 "category, category_group, category_group_source, address, "
@@ -606,7 +618,7 @@ def build_index(
                     manual_lat,
                     manual_lng,
                     canonical.match_status,
-                    canonical.place_kind,
+                    effective_place_kind,
                     has_osm_candidate,
                     place_state,
                     place_state_reason,
@@ -802,9 +814,8 @@ def build_index(
         "osm_conflicts": sum(
             1 for place in canonical_places if place.match_status == "conflict"
         ),
-        "address_places": sum(
-            1 for place in canonical_places if place.place_kind == "address"
-        ),
+        "address_places": kind_counts.get("address", 0),
+        "venue_places": kind_counts.get("venue", 0),
         "manual_addresses": len(manual_addresses),
         "manual_names": len(manual_names),
         "place_states": state_counts,
