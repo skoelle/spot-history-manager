@@ -1,18 +1,20 @@
-# spot-history-manager
+# 📍 spot-history-manager
 
-Sammelt Check-in-/Besuchshistorien aus mehreren Diensten, speichert jede Quelle
-in einer eigenen SQLite-Datenbank und baut daraus einen zentralen, rebuildbaren
-Index plus GeoJSON für eine spätere OpenStreetMap-Karte.
+Collects check-in and visit histories from multiple services, stores each source
+in its own SQLite database, and builds a central, rebuildable index plus GeoJSON
+for an OpenStreetMap map.
 
-Aktuell implementiert: **Foursquare/Swarm** (API-Sync), **Yelp**
-(einmaliger HTML-Import) und **Google Timeline** (iPhone-/Takeout-Import mit
-kostenloser OSM-Anreicherung).
+Currently implemented:
 
-## Voraussetzungen
+- 🟦 **Foursquare/Swarm** (API sync)
+- 🟥 **Yelp** (one-time HTML import)
+- 🟩 **Google Timeline** (iPhone/Takeout import with free OSM enrichment)
 
-- Python 3.10+; Sync, Index und Importe nutzen nur die Standardbibliothek
-- Für die Web-Oberfläche: FastAPI, uvicorn, Jinja2 und Pillow aus `requirements.txt`
-- `.env` mit `FOURSQUARE_OAUTH_TOKEN`
+## ✅ Requirements
+
+- Python 3.10+; sync, index builds, and imports use only the standard library
+- For the web interface: FastAPI, uvicorn, Jinja2, and Pillow from `requirements.txt`
+- `.env` with `FOURSQUARE_OAUTH_TOKEN`
 
 ```bash
 cp .env.example .env
@@ -23,464 +25,449 @@ chmod 600 .env
 FOURSQUARE_OAUTH_TOKEN=...
 ```
 
-## Benutzung
+## 🚀 Usage
 
 ```bash
-# Foursquare: erster Lauf (komplette Historie)
+# Foursquare: first run (full history)
 python3 -m spot_history foursquare backfill
 
-# Später: nur Neues seit dem letzten Stand
+# Later: only new items since the last sync
 ./sync.sh
-# oder:
+# or:
 python3 -m spot_history foursquare sync
 
-# Zusammenfassung
+# Summary
 python3 -m spot_history foursquare stats
 
-# API-Endpunkte nur lesend prüfen (v2 + Places API)
+# Check API endpoints read-only (v2 + Places API)
 python3 -m spot_history foursquare probe
 
-# Places-API-Baseline einmalig aus JSON importieren (ohne API-Calls)
+# Import the Places API baseline once from JSON (no API calls)
 python3 -m spot_history foursquare venue-import
 
-# Google Timeline exportieren, prüfen, importieren und über OSM anreichern
+# Export, inspect, import, and enrich Google Timeline via OSM
 python3 -m spot_history google scan     --input "$GOOGLE_TIMELINE_INBOX"
 python3 -m spot_history google import   --input "$GOOGLE_TIMELINE_INBOX"
 python3 -m spot_history google osm
 python3 -m spot_history google stats
 
-# Alle Quellen in den zentralen Index + GeoJSON überführen
+# Build the central index + GeoJSON for all sources
 python3 -m spot_history index build
 
-# Kanonische Orte prüfen und manuell korrigieren
+# Inspect and manually correct canonical places
 python3 -m spot_history places stats
 python3 -m spot_history places candidates
 python3 -m spot_history places audit
 python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
 
-# Thumbnails für die Web-UI (Pillow, einmalig bzw. nach neuen Fotos)
+# Thumbnails for the web UI (Pillow, once or after new photos)
 .venv/bin/python -m spot_history index thumbs
 
-# Web-Oberfläche (Liste + OpenStreetMap-Karte + Fotos)
-.venv/bin/pip install -r requirements.txt   # einmalig
+# Web interface (list + OpenStreetMap map + photos)
+.venv/bin/pip install -r requirements.txt   # once
 ./web.sh                                    # 0.0.0.0:8345
 ```
 
-Optionen beim Foursquare-Connector: `--data-dir`, `--db`, `--sleep`,
-`--no-photos`, `--no-export`, `--verbose`. `probe` ist rein lesend und schreibt
-keine Daten. Die Web-Oberfläche liest nur den Index; `index build` läuft
-getrennt davor.
+Foursquare connector options: `--data-dir`, `--db`, `--sleep`, `--no-photos`,
+`--no-export`, `--verbose`. `probe` is read-only and writes no data. The web
+interface only reads the index; run `index build` separately beforehand.
 
-## Datenlayout
+## 🗂️ Data layout
 
 ```
 data/
 ├── foursquare/
-│   ├── foursquare.db          Quelle (Check-ins, Venues, Fotos, Listen, Tipps, Profil, Sync-Status)
+│   ├── foursquare.db          source (check-ins, venues, photos, lists, tips, profile, sync state)
 │   ├── exports/               checkins, photos, comments, likes, lists, tips, profile, venues, venue_details (CSV)
-│   ├── places_api_venue_details.json  Baseline-Dump der Places API (Import-Quelle, gitignored)
-│   ├── profile/               lokales Profilbild
-│   ├── photos/<checkin_id>/   Bilddateien (Standalone unter photos/_standalone/)
-│   └── thumbs/                320-px-Vorschaubilder für die Web-UI
-├── yelp/                      yelp.db + media/ + thumbs/ (HTML-Import)
-├── google/                    google.db (Quelle) + osm_cache.db (Enrichment-Cache)
-├── osm/osm.db                 OSM-POI-Cache und Abfrage-Cache (Overpass/Nominatim)
-├── places/place_rules.db      persistente manuelle Merge-/Unmerge-Regeln
-├── places/identity.db         persistente OSM-Zuordnungen + URL-Aliase
-├── index/index.db             zentraler, rebuildbarer Index
-└── exports/visits.geojson     Kartenpunkte aller Quellen
+│   ├── places_api_venue_details.json  baseline dump from the Places API (import source, gitignored)
+│   ├── profile/               local profile picture
+│   ├── photos/<checkin_id>/   image files (standalone under photos/_standalone/)
+│   └── thumbs/                320 px thumbnails for the web UI
+├── yelp/                      yelp.db + media/ + thumbs/ (HTML import)
+├── google/                    google.db (source) + osm_cache.db (enrichment cache)
+├── osm/osm.db                 OSM POI cache and query cache (Overpass/Nominatim)
+├── places/place_rules.db      persistent manual merge/unmerge rules
+├── places/identity.db         persistent OSM assignments + URL aliases
+├── index/index.db             central, rebuildable index
+└── exports/visits.geojson     map points from all sources
 ```
 
-Die Quell-DBs sind die Wahrheit. Der Index wird bei jedem `index build` neu aus
-den Connectors und den Regeln in `data/places/place_rules.db` erzeugt und kann
-gefahrlos gelöscht werden. Nur die Regel-DB bleibt dauerhaft.
+The source databases are the source of truth. The index is rebuilt from the
+connectors and the rules in `data/places/place_rules.db` on every `index build`
+and can be safely deleted. Only the rules database is persistent.
 
-## Web-Oberfläche
+## 🖥️ Web interface
 
-`./web.sh` startet FastAPI/Jinja auf `http://<host>:8345` (Bind `0.0.0.0`).
-Die Seite zeigt standardmäßig alle Besuche in München, mit Filtern für Stadt,
-Jahr, Hauptkategorie, Unterkategorie, Quelle und Freitext. Oben eine
-Leaflet-Karte mit OpenStreetMap-Tiles (Leaflet liegt lokal unter
-`spot_history/web/static/vendor/leaflet/`), darunter die Liste mit 60 Treffern
-pro Seite. Klick auf Karte und Liste ist synchronisiert. Besuchskarten zeigen
-Start- und Endzeit sowie die Aufenthaltsdauer, sofern die Quelle eine Endzeit
-liefert (aktuell Google Timeline).
+`./web.sh` starts FastAPI/Jinja on `http://<host>:8345` (bind `0.0.0.0`).
+By default, the page shows all visits in Munich, with filters for city, year,
+main category, subcategory, source, and free text. At the top is a Leaflet map
+with OpenStreetMap tiles (Leaflet is vendored locally under
+`spot_history/web/static/vendor/leaflet/`); below it is the list with 60 results
+per page. Map and list selection are synchronized. Visit cards show start and
+end time as well as duration when the source provides an end time (currently
+Google Timeline).
 
-Die Fein-Kategorien (z. B. `German Restaurant`, `Café`, `Beer Garden`) werden
-beim Index-Build in Hauptkategorien zusammengefasst (`Restaurants`, `Cafés`,
-`Biergarten`, `Bars & Nightlife`, `Kultur & Sehenswürdigkeiten`, ...). Die
-Feinkategorie bleibt als Unterkategorie erhalten. Foursquare liefert die
-Feinkategorie; Yelp enthält im Export keine Ortskategorie. Bei Orten ohne
-Kategorie wird die Hauptkategorie konservativ aus dem Ortsnamen abgeleitet und
-in der UI mit `≈` markiert. Ohne Treffer bleibt `Ohne Kategorie`.
+Fine-grained categories (e.g. `German Restaurant`, `Café`, `Beer Garden`) are
+grouped into main categories during the index build (`Restaurants`, `Cafés`,
+`Biergarten`, `Bars & Nightlife`, `Kultur & Sehenswürdigkeiten`, ...). The fine
+category is kept as a subcategory. Foursquare provides the fine category;
+Yelp's export contains no place category. For places without a category, the
+main category is conservatively derived from the place name and marked with `≈`
+in the UI. If there is no match, the UI shows `Ohne Kategorie`.
 
-Zusätzlich gibt es eine Profilkarte mit lokal gespeichertem Avatar sowie eine
-Ortsliste unter `/venues` mit Filtern und Detailseiten unter `/venues/{key}`.
-Der `{key}` ist `osm-<type>-<id>` (z. B. `osm-way-247857140`) für gematchte Orte
-und `local-<source>-<source_place_id>` für noch nicht gematchte Orte. Alte
-Integer-URLs und frühere Schlüssel werden per 302 auf den aktuellen Key
-umgeleitet.
-Die Ortsliste zeigt einen Eintrag pro kanonischem Ort mit Badges für alle
-Quellen. Die Detailseite zeigt Adresse, Kategorie, Koordinaten, Besuchszahl,
-ersten und letzten Besuch, Fotoanzahl, Fotogalerie, die Besuchshistorie und
-alle vorhandenen Quell-Links (Foursquare und/oder Yelp).
+There is also a profile card with a locally stored avatar, plus a place list at
+`/venues` with filters and detail pages at `/venues/{key}`. The `{key}` is
+`osm-<type>-<id>` (e.g. `osm-way-247857140`) for matched places and
+`local-<source>-<source_place_id>` for places that have not been matched yet.
+Legacy integer URLs and previous keys redirect with 302 to the current key.
+The place list shows one entry per canonical place with badges for all sources.
+The detail page shows address, category, coordinates, visit count, first and
+last visit, photo count, photo gallery, visit history, and all available source
+links (Foursquare and/or Yelp).
 
-Die Navigation führt zu **Check-ins**, **Orten**, **Fotos**, **Foursquare**,
-**Yelp** und **Google**.
-Die Fotoseite `/photos` zeigt Thumbnails mit Filtern (Stadt, Jahr, Quelle,
-Suche) und Pagination; Klick öffnet eine Lightbox mit dem Original.
-Check-in-Karten zeigen bis zu drei Vorschaubilder, Venue-Detailseiten eine
-Galerie. Yelp-Videos werden als eigener Video-Eintrag dargestellt.
-Venue-Detailseiten zeigen zusätzlich Yelp-Survey-Antworten, passende
-Business-Interaktionen sowie Fotos ohne Check-in, die über den Ortsnamen der
-Venue zugeordnet wurden (Badge „ohne Check-in“). Kommentare ohne Check-in
-werden als echte Visits behandelt: Sie erscheinen in der Check-in-Liste, der
-Venue-Historie, den Zählern und – bei vorhandenen Ortskoordinaten – als
-abgeleitete Kartenpunkte, jeweils mit Badge „Kommentar“. Kommentare zu einem
-vorhandenen Check-in erscheinen als Kommentarzeilen am jeweiligen Visit.
-Die Seite `/foursquare` zeigt das Foursquare-Profil und bündelt Tips, Listen
-(inklusive Listeneinträgen), Tastes sowie Kommentare und Likes der Check-ins.
-Tips und Listenzugehörigkeiten (inklusive „Geliked“/„Gespeichert“) erscheinen
-zusätzlich oben auf der jeweiligen Venue-Detailseite; Check-in-Kommentare und
-Likes werden am Visit angezeigt.
-Die Seite `/yelp` (früher `/aktivitaet`; alte Links werden umgeleitet) zeigt
-oben die Kontodaten und das Yelp-Profilfoto als flachen Profilblock
-(Profilfoto nicht mehr unter „Fotos ohne Check-in“) und bündelt darunter
-Komplimente, Nachrichten, Milestones, Forumsbeiträge, Review-/Foto-Feedback und
-Interaktionen.
-Foto-Feedback verlinkt auf die Yelp-Fotoseite, da im Export kein lokales Bild
-dazu existiert.
-Sensible Felder (E-Mail, Telefon, IP-Adressen, Logins, gemeldete Inhalte)
-werden importiert, aber nicht im Web angezeigt.
+The navigation leads to **Check-ins**, **Orte**, **Fotos**, **Foursquare**,
+**Yelp**, and **Google**.
+The photo page `/photos` shows thumbnails with filters (city, year, source,
+search) and pagination; clicking opens a lightbox with the original image.
+Check-in cards show up to three preview images; venue detail pages show a
+gallery. Yelp videos are shown as a separate video entry.
+Venue detail pages also show Yelp survey answers, matching business
+interactions, and photos without a check-in that were assigned to the venue via
+the place name (badge `ohne Check-in`). Comments without a check-in are treated
+as real visits: they appear in the check-in list, the venue history, the
+counters, and — when place coordinates exist — as derived map points, each with
+the `Kommentar` badge. Comments on an existing check-in appear as comment lines
+on the respective visit.
+The `/foursquare` page shows the Foursquare profile and bundles tips, lists
+(including list entries), tastes, and check-in comments and likes. Tips and list
+memberships (including `Geliked`/`Gespeichert`) also appear at the top of the
+respective venue detail page; check-in comments and likes are shown on the
+visit.
+The `/yelp` page (formerly `/aktivitaet`; old links redirect) shows account data
+and the Yelp profile photo as a flat profile block at the top (the profile photo
+is no longer under `Fotos ohne Check-in`) and bundles compliments, messages,
+milestones, forum posts, review/photo feedback, and interactions below it.
+Photo feedback links to the Yelp photo page because the export contains no
+local image for it.
+Sensitive fields (email, phone, IP addresses, logins, reported content) are
+imported but not shown in the web UI.
 
-Der Karten-Popup zeigt Quelle, Kategorie, Adresse/Stadt und einen direkten Link
-zum Ort (`/venues/{key}`), nicht mehr den Foursquare-Original-Link.
+The map popup shows source, category, address/city, and a direct link to the
+place (`/venues/{key}`), no longer the original Foursquare link.
 
-Die Ortsliste hat einen Filter **OSM-Status** (mit OSM-ID, nur lokal, ohne
-OSM-ID, Konflikte). Auf der Detailseite eines nicht gematchten Orts gibt es ein
-Panel **„OSM-Objekt zuordnen“** mit manueller Eingabe (`node/123`,
-`way-247857140` oder OSM-URL) und – falls vorhanden – den Kandidaten aus
-`osm sync` zum Übernehmen. Bei gematchten Orten lässt sich die Zuordnung dort
-wieder entfernen. Jede Änderung schreibt in `data/places/identity.db` und baut
-den Index sofort neu; danach leitet die Seite auf den neuen Key um. Die
-POST-Endpunkte prüfen die Herkunft (Same-Origin), die Oberfläche bleibt aber
-wie der Rest ohne Login und ist für LAN/interne Nutzung gedacht.
+The place list has an **OSM-Status** filter (with OSM ID, local only, without
+OSM ID, conflicts). On the detail page of an unmatched place there is an
+**`OSM-Objekt zuordnen`** panel with manual input (`node/123`,
+`way-247857140`, or an OSM URL) and — if available — candidates from `osm sync`
+that can be accepted. For matched places, the assignment can be removed there.
+Every change writes to `data/places/identity.db` and immediately rebuilds the
+index; afterwards the page redirects to the new key. The POST endpoints check
+the origin (same-origin), but the UI, like the rest, has no login and is
+intended for LAN/internal use.
 
-Lokale Bilder und Thumbnails werden über `/media/...` ausgeliefert. Erlaubt sind
-nur Bild- und Videodateien unter `data/*/profile/`, `data/*/photos/`,
-`data/*/media/` und `data/*/thumbs/`; Datenbanken, Exporte und Pfad-Traversal
-werden blockiert.
+Local images and thumbnails are served via `/media/...`. Only image and video
+files under `data/*/profile/`, `data/*/photos/`, `data/*/media/`, and
+`data/*/thumbs/` are allowed; databases, exports, and path traversal are
+blocked.
 
-Thumbnails werden mit `.venv/bin/python -m spot_history index thumbs` erzeugt
-(320 px, nach neuen Fotos erneut ausführen; `--force` erzwingt Neuberechnung).
-Ohne Thumbnails fällt die Web-UI auf die Originaldateien zurück.
+Thumbnails are generated with `.venv/bin/python -m spot_history index thumbs`
+(320 px; rerun after new photos; `--force` forces recalculation). Without
+thumbnails, the web UI falls back to the original files.
 
-Die Oberfläche hat **keine Authentifizierung** und ist für LAN/interne Nutzung
-gedacht.
+The interface has **no authentication** and is intended for LAN/internal use.
 
-## Zentraler Index
+## 🧭 Central index
 
-- `sources` – welche Quellen enthalten sind
-- `source_profiles` – Anzeigename, Home City, Avatar und Zähler je Quelle
-- `places` – quellenspezifische Orte (`source`, `source_place_id`)
-- `place_details` – Kontakt, Social-Media, Kategorien und Datenstand je Ort
-- `canonical_places` – ein Ort pro realem Ort, aggregiert über Quellen, inkl.
-  `canonical_key`, `category`/`category_group`/`category_group_source`,
-  `osm_type`, `osm_id`, `match_status` sowie `osm_lat`/`osm_lng` aus dem
-  OSM-Cache
-- `canonical_aliases` – frühere Keys für Redirects auf den aktuellen Key
-- `place_links` – Quell-Identitäten und Links je kanonischem Ort
-- `merge_candidates` – nicht automatisch angewandte Merge-Vorschläge
-- `source_records` – Detail- und Aktivitätsdaten je Quelle (Yelp-Surveys,
-  Interaktionen, Komplimente, Nachrichten, Feedback u. a.)
-- `visits` – Besuche/Check-ins mit Zeit, Koordinaten, Notiz, Quell-URL
-  (`place_id` = Quell-Ort, `canonical_place_id` = kanonischer Ort)
-- `photos` – Fotometadaten + lokaler Pfad
-- `index_meta` – Build-Zeitpunkt
+- `sources` – which sources are included
+- `source_profiles` – display name, home city, avatar, and counters per source
+- `places` – source-specific places (`source`, `source_place_id`)
+- `place_details` – contact, social media, categories, and data timestamp per place
+- `canonical_places` – one place per real-world place, aggregated across sources,
+  including `canonical_key`, `category`/`category_group`/`category_group_source`,
+  `osm_type`, `osm_id`, `match_status`, and `osm_lat`/`osm_lng` from the OSM cache
+- `canonical_aliases` – previous keys for redirects to the current key
+- `place_links` – source identities and links per canonical place
+- `merge_candidates` – merge suggestions that were not applied automatically
+- `source_records` – detail and activity data per source (Yelp surveys,
+  interactions, compliments, messages, feedback, etc.)
+- `visits` – visits/check-ins with time, coordinates, note, source URL
+  (`place_id` = source place, `canonical_place_id` = canonical place)
+- `photos` – photo metadata + local path
+- `index_meta` – build timestamp
 
-`visits.geojson` ist eine `FeatureCollection` mit einem Punkt pro Visit
-(Koordinaten als `[lng, lat]`), inklusive Quelle, Ort, Kategorie,
-Hauptkategorie, Zeit, kanonischem Ort, Quellenliste und lokalen Fotopfaden. Das
-reicht für Leaflet/MapLibre mit OSM-Tiles.
+`visits.geojson` is a `FeatureCollection` with one point per visit (coordinates
+as `[lng, lat]`), including source, place, category, main category, time,
+canonical place, source list, and local photo paths. This is enough for
+Leaflet/MapLibre with OSM tiles.
 
-## Zusammengeführte Orte
+## 🔗 Merged places
 
-Der Index bildet pro realem Ort einen kanonischen Ort. Jede Quelle bleibt als
-eigener Eintrag in `place_links` erhalten, inklusive `source`, stabiler
-`source_place_id` und – falls vorhanden – Original-URL. Damit zeigt ein
-gemergter Ort z. B. den Foursquare-Venue-Link und den Yelp-Business-Link
-gleichzeitig.
+The index creates one canonical place per real-world place. Each source remains
+as its own entry in `place_links`, including `source`, stable `source_place_id`,
+and — if available — the original URL. This means a merged place shows, for
+example, the Foursquare venue link and the Yelp business link at the same time.
 
-Automatisch gemergt wird nur konservativ:
+Automatic merging is conservative:
 
-1. normalisierter Name gleich und Koordinaten höchstens 50 m auseinander
-   (genau ein Kandidat), oder
-2. normalisierter Name gleich, keine Yelp-Koordinaten und genau ein
-   Foursquare-Ort mit derselben Stadt, oder
-3. Namensvariante mit Ähnlichkeit ≥ 0,9 und Koordinaten höchstens 25 m
-   auseinander (genau eine eindeutige Zuordnung, kompatible Kategorie).
+1. normalized name equal and coordinates at most 50 m apart (exactly one
+   candidate), or
+2. normalized name equal, no Yelp coordinates, and exactly one Foursquare place
+   in the same city, or
+3. name variant with similarity ≥ 0.9 and coordinates at most 25 m apart
+   (exactly one unambiguous match, compatible category).
 
-Für Variante 3 werden typografische Apostrophe, Umlaut-Schreibweisen
-(`Femörefortet`/`Femorefortet`), Zahlwörter (`Sechzehn`/`16`),
-Klammer-Aliase und generische Präfixe (`Wirtshaus`, `Restaurant`, `Café`,
-`Gartencenter` …) normalisiert. Namensbestandteile, die vollständig in einem
-längeren Namen enthalten sind, gelten als starke Übereinstimmung.
+For variant 3, typographic apostrophes, umlaut spellings
+(`Femörefortet`/`Femorefortet`), number words (`Sechzehn`/`16`), bracket
+aliases, and generic prefixes (`Wirtshaus`, `Restaurant`, `Café`,
+`Gartencenter`, ...) are normalized. Name components that are fully contained in
+a longer name count as a strong match.
 
-Alles andere landet in `merge_candidates` und wird nicht automatisch
-zusammengeführt, z. B. gleicher Name mit mehreren Kandidaten, gleicher Name
-in derselben Stadt mit weit auseinanderliegenden Koordinaten oder
-unterschiedliche OSM-IDs.
+Everything else ends up in `merge_candidates` and is not merged automatically,
+e.g. the same name with multiple candidates, the same name in the same city with
+far-apart coordinates, or different OSM IDs.
 
-Sobald eine OSM-ID zugeordnet ist, wird sie zum harten Identitätsmerkmal:
-Quell-Orte mit derselben OSM-ID werden immer zusammengeführt, Quell-Orte mit
-unterschiedlichen OSM-IDs nie. Die Zuordnungen liegen persistent in
-`data/places/identity.db` und überleben jeden Index-Rebuild; dort werden auch
-Aliase für Redirects gespeichert. Manuelle
-Entscheidungen liegen dauerhaft in
-`data/places/place_rules.db` und überleben jeden Index-Rebuild:
+Once an OSM ID is assigned, it becomes a hard identity: source places with the
+same OSM ID are always merged, and source places with different OSM IDs never
+are. Assignments are stored persistently in `data/places/identity.db` and
+survive every index rebuild; aliases for redirects are stored there as well.
+Manual decisions are stored persistently in `data/places/place_rules.db` and
+survive every index rebuild:
 
 ```bash
-# Zahlen, offene Vorschläge und Verdachtsfälle
+# Counts, open suggestions, and suspect cases
 python3 -m spot_history places stats
 python3 -m spot_history places candidates [--source yelp] [--json]
 python3 -m spot_history places audit [--source google] [--radius 50] [--json]
 
-# dauerhaft manuell zusammenführen / Auto-Merge abschalten / Regel löschen
+# Permanently merge manually / disable auto-merge / delete a rule
 python3 -m spot_history places merge yelp:<place_key> foursquare:<venue_id>
 python3 -m spot_history places unmerge yelp:<place_key>
 python3 -m spot_history places reset yelp:<place_key>
 ```
 
-`places audit` ist rein lesend: Es sucht Orte, die nur aus einer Quelle
-stammen und trotzdem einen nahen Ort einer anderen Quelle mit ähnlichem Namen
-haben. Ausgabe und `--json` eignen sich als Vorher/Nachher-Vergleich nach
-Matching-Änderungen.
+`places audit` is read-only: it looks for places that come from only one source
+but still have a nearby place from another source with a similar name. Its
+output and `--json` are suitable for before/after comparisons after matching
+changes.
 
-Die Venue-Detailseite bietet zusätzlich ein Panel **„Ort zusammenführen“**:
-nahe Orte mit Distanz und Namens-Ähnlichkeit lassen sich direkt zusammenführen;
-bereits zusammengeführte Quell-Orte lassen sich dort wieder trennen. Beides
-schreibt Regeln in `data/places/place_rules.db` und baut den Index neu.
+The venue detail page also offers an **`Ort zusammenführen`** panel: nearby
+places with distance and name similarity can be merged directly; already merged
+source places can be split there again. Both write rules to
+`data/places/place_rules.db` and rebuild the index.
 
-`merge`, `unmerge` und `reset` bauen den Index standardmäßig sofort neu
-(`--no-build` überspringt das). Aktueller Datenstand: 2462 Quell-Orte, 2190
-kanonische Orte, 254 gemergte Orte (davon 2 manuell) und 38 offene
-Merge-Vorschläge.
+`merge`, `unmerge`, and `reset` rebuild the index immediately by default
+(`--no-build` skips this). Current data state: 2462 source places, 2190
+canonical places, 254 merged places (2 of them manual), and 38 open merge
+suggestions.
 
-Bekannte Grenzen:
+Known limits:
 
-- Yelp-Orte werden intern über den normalisierten Namen gruppiert
-  (`place_key`). Gleichnamige Orte in verschiedenen Städten sind damit schon in
-  der Yelp-Quelle ein Ort.
-- Auto-Merges über Name + Stadt sind Heuristiken; `places unmerge` ist der
-  Korrekturweg.
-- Unterschiedliche OSM-IDs bleiben ein harter Konflikt und werden nie
-  automatisch zusammengeführt. Solche Fälle erscheinen im Audit und können über
-  das UI-Panel manuell zusammengeführt werden.
-- Adressbenannte Google-Cluster (Straße + Hausnummer) lassen sich über Namen
-  kaum automatisch zuordnen; sie bleiben Kandidaten für die manuelle
-  Zusammenführung.
-- Nur 16 der 284 Yelp-Orte haben im Export eine echte Business-URL (aus
-  Lesezeichen/Sammlungen, die auch einen Check-in haben). Bei den übrigen
-  bleibt der Yelp-Link leer.
-- Öffentliche Orts-URLs verwenden `canonical_key` (`osm-...` oder `local-...`),
-  nicht den internen Integer-`id`. Frühere Keys bleiben über
-  `canonical_aliases` (und `data/places/identity.db`) als Redirect erhalten.
+- Yelp places are grouped internally by normalized name (`place_key`). Places
+  with the same name in different cities are therefore already one place within
+  the Yelp source.
+- Auto-merges via name + city are heuristics; `places unmerge` is the correction
+  path.
+- Different OSM IDs remain a hard conflict and are never merged automatically.
+  Such cases appear in the audit and can be merged manually via the UI panel.
+- Address-named Google clusters (street + house number) are hard to match
+  automatically by name; they remain candidates for manual merging.
+- Only 16 of the 284 Yelp places have a real business URL in the export (from
+  bookmarks/collections that also have a check-in). For the rest, the Yelp link
+  remains empty.
+- Public place URLs use `canonical_key` (`osm-...` or `local-...`), not the
+  internal integer `id`. Previous keys remain available as redirects via
+  `canonical_aliases` (and `data/places/identity.db`).
 
-## OSM-Zuordnung
+## 🌍 OSM matching
 
 ```bash
-# Voraussetzung: aktueller Index (liefert Namen, Koordinaten und Quell-Links)
+# Prerequisite: current index (provides names, coordinates, and source links)
 python3 -m spot_history index build
 
-# Offene Orte über Overpass matchen (Fallback auf Nominatim je Batch)
+# Match open places via Overpass (fallback to Nominatim per batch)
 python3 -m spot_history osm sync
 
-# Alternativen für Tests oder wenn Overpass nicht erreichbar ist
+# Alternatives for tests or when Overpass is unreachable
 python3 -m spot_history osm sync --limit 25 --dry-run --verbose
 python3 -m spot_history osm sync --provider nominatim
 
-# Offline-Rematch gegen den vorhandenen POI-Cache (kein Netzwerk)
+# Offline rematch against the existing POI cache (no network)
 python3 -m spot_history osm rematch --dry-run --verbose
 python3 -m spot_history osm rematch
 
-# Netzwerk-Fallback: Venues ohne OSM-ID und ohne Vorschlag über Nominatim suchen
+# Network fallback: search for venues without OSM ID and without a candidate via Nominatim
 python3 -m spot_history osm net-scan --dry-run --verbose
 python3 -m spot_history osm net-scan --limit 50
 
-# Danach OSM-Keys in den Index übernehmen
+# Then copy OSM keys into the index
 python3 -m spot_history index build
 
-# Status, offene Kandidaten und nicht gematchte Orte
+# Status, open candidates, and unmatched places
 python3 -m spot_history osm stats
 python3 -m spot_history places osm-candidates [--json]
 python3 -m spot_history places unmatched [--city München] [--json]
 python3 -m spot_history places unmatched --kind venue --without-candidate
 
-# Kandidat oder manuelle OSM-ID übernehmen / Zuordnung entfernen
+# Accept a candidate or manual OSM ID / remove an assignment
 python3 -m spot_history places osm-accept foursquare:<venue_id>
 python3 -m spot_history places assign-osm foursquare:<venue_id> way/247857140
 python3 -m spot_history places unassign-osm foursquare:<venue_id>
 ```
 
-- `osm sync` liest den Index nur und schreibt ausschließlich in
-  `data/osm/osm.db` (POI-/Abfrage-Cache) und `data/places/identity.db`
-  (Zuordnungen/Kandidaten). Es werden keine Quell-DBs verändert.
-- Overpass wird gebündelt pro `--chunk`-Punkte abgefragt (Default 40, Radius
-  120 m). Schlägt ein Batch fehl, werden die betroffenen Orte über Nominatim
-  nachgeladen; Nominatim wird mit maximal ca. 1 Request/s und Cache genutzt.
-- Automatische Zuordnung nur bei eindeutigem, hohem Score über den aktuellen
-  OSM-Namen (Name + Distanz/Stadt). Treffer über Alt-/Alternativnamen
-  (`old_name`, `alt_name`, `brand`, `operator`, `name:*`) oder unscharfen
-  Namensvergleich landen immer als Kandidat in der Identitäts-DB und müssen
-  über `osm-accept`, `assign-osm` oder die Web-UI bestätigt werden.
-- `osm rematch` wertet offene Orte ausschließlich gegen `data/osm/osm.db` aus
-  (kein Overpass/Nominatim) und ergänzt so auch nachträglich Kandidaten aus
-  dem Cache. Adress-/Straßennamen werden dabei als `place_kind = address`
-  geführt und nicht als Venue gematcht.
-- `osm net-scan` sucht nur für Venues ohne OSM-ID und ohne vorhandenen
-  Kandidaten über Nominatim (Name + Stadt + Adresse). Auch weit entfernte
-  Treffer (bis `--max-distance`, Default 2000 m) werden nur als Kandidat
-  gespeichert, nie automatisch zugeordnet. Cache und Rate-Limit werden
-  eingehalten; `--force` ignoriert den Nominatim-Cache.
-- `--force` ignoriert den Abfrage-Cache; `--dry-run` matcht nur und schreibt
-  keine Zuordnungen. In der Ortsliste gibt es Filter für Ortsart
-  (Venue/Adresse) und „ohne OSM-Vorschlag“.
-- Gematchte Orte übernehmen die gecachten OSM-Koordinaten in den Index
-  (`osm_lat`/`osm_lng`). Hauptkarte, Venue-Detailseite und `visits.geojson`
-  bevorzugen diese Position; fehlt sie, gelten weiter die Quellkoordinaten.
-  Die Quellkoordinaten bleiben in `lat`/`lng` erhalten.
-- OSM-Daten stehen unter ODbL; bei öffentlicher Darstellung ist
-  „© OpenStreetMap contributors“ erforderlich. Nominatim ist kein
-  Massen-Scraper – Cache und Rate-Limit beibehalten.
+- `osm sync` only reads the index and writes exclusively to `data/osm/osm.db`
+  (POI/query cache) and `data/places/identity.db` (assignments/candidates).
+  Source databases are not modified.
+- Overpass is queried in batches per `--chunk` points (default 40, radius 120 m).
+  If a batch fails, the affected places are fetched via Nominatim; Nominatim is
+  used with at most about 1 request/s and a cache.
+- Automatic assignment only for an unambiguous, high score against the current
+  OSM name (name + distance/city). Matches via old/alternative names
+  (`old_name`, `alt_name`, `brand`, `operator`, `name:*`) or fuzzy name
+  comparison always end up as candidates in the identity DB and must be
+  confirmed via `osm-accept`, `assign-osm`, or the web UI.
+- `osm rematch` evaluates open places exclusively against `data/osm/osm.db` (no
+  Overpass/Nominatim) and can therefore add candidates from the cache later.
+  Address/street names are tracked as `place_kind = address` and are not matched
+  as venues.
+- `osm net-scan` searches only for venues without an OSM ID and without an
+  existing candidate via Nominatim (name + city + address). Even distant matches
+  (up to `--max-distance`, default 2000 m) are only stored as candidates, never
+  assigned automatically. The cache and rate limit are respected; `--force`
+  ignores the Nominatim cache.
+- `--force` ignores the query cache; `--dry-run` only matches and writes no
+  assignments. The place list has filters for place kind (venue/address) and
+  "without OSM suggestion".
+- Matched places take the cached OSM coordinates into the index
+  (`osm_lat`/`osm_lng`). The main map, venue detail page, and `visits.geojson`
+  prefer this position; if it is missing, the source coordinates still apply.
+  The source coordinates remain in `lat`/`lng`.
+- OSM data is licensed under ODbL; public display requires
+  "© OpenStreetMap contributors". Nominatim is not a bulk scraper — keep the
+  cache and rate limit in place.
 
-## Foursquare-Details
+## 🟦 Foursquare details
 
-- Check-ins: 2339 laut API, 2338 eindeutig (1 gelöscht/privat)
-- 1036 Venues, 577 Fotos (562 mit Check-in verknüpft, 15 standalone),
-  115 Kommentare, 294 Likes
-- Zeitraum 2010-01-28 bis 2026-09-01
-- Paginierung über `beforeTimestamp` (Offset-Paging wird von Foursquare nach
-  wenigen hundert Einträgen gekappt und wiederholt dann die erste Seite)
-- Nutzerfotos liefern maximal 200 Einträge pro Seite; der Offset muss um die
-  tatsächlich gelieferte Anzahl erhöht werden. Die 577 API-Items enthalten
-  574 eindeutige IDs (3 Duplikate).
-- Kommentartexte werden über `/v2/checkins/<id>/comments` nachgeladen
-- Der Sync-Stand (`last_max_created_at`) liegt in `sync_state`; `sync` holt nur
-  Neues und schreibt Exporte neu
-- Zusätzlich importiert: `venuehistory` (1029 von 1051 API-Venues), `lists`
-  (5 Listen, 150 Listeneinträge; bei „My Liked Places“ 53 von 54), `tips`
-  (11, inkl. Details wie Sprache, Saves, Titel) und alle Nutzerfotos
-  (577; 562 mit Check-in, 15 standalone)
-- Die fehlenden Einträge (22 Venues, 1 Listeneintrag) werden auch mit
-  alternativen Offset-Strategien nicht ausgeliefert und in
-  `sync_diagnostics` dokumentiert.
-- Tastes (`/v2/users/self/tastes`, 17 Einträge) und die Tip-Details
-  (`/v2/tips/<id>`) werden vollständig inklusive Roh-JSON gespeichert
-- Nutzerprofil inklusive Zählern und lokal gespeichertem Avatar
+- Check-ins: 2339 per API, 2338 unique (1 deleted/private)
+- 1036 venues, 577 photos (562 linked to check-ins, 15 standalone),
+  115 comments, 294 likes
+- Period: 2010-01-28 to 2026-09-01
+- Pagination via `beforeTimestamp` (offset paging is capped by Foursquare after
+  a few hundred entries and then repeats the first page)
+- User photos return at most 200 entries per page; the offset must be advanced
+  by the number actually returned. The 577 API items contain 574 unique IDs
+  (3 duplicates).
+- Comment texts are loaded via `/v2/checkins/<id>/comments`
+- The sync state (`last_max_created_at`) is stored in `sync_state`; `sync` only
+  fetches new items and rewrites the exports
+- Also imported: `venuehistory` (1029 of 1051 API venues), `lists` (5 lists,
+  150 list entries; 53 of 54 for "My Liked Places"), `tips` (11, including
+  details such as language, saves, and title), and all user photos (577; 562 with
+  check-in, 15 standalone)
+- The missing entries (22 venues, 1 list entry) are not delivered even with
+  alternative offset strategies and are documented in `sync_diagnostics`.
+- Tastes (`/v2/users/self/tastes`, 17 entries) and tip details (`/v2/tips/<id>`)
+  are stored completely, including raw JSON
+- User profile including counters and a locally stored avatar
   (`data/foursquare/profile/`)
-- Bekannte API-Lücken werden in `sync_diagnostics` dokumentiert und in `stats`
-  angezeigt
-- Venue-Details (Öffnungszeiten, Preis, Rating, Venue-Fotos/-Tipps) sind aktuell
-  nicht abrufbar: `/v2/venues/{id}` liefert 402, die Places-API mit
-  Premium-Feldern, `/photos`, `/tips` und `/places/ask` 429. Die 1036
-  Venue-Snapshots aus den Check-ins reichen für Liste und Detailseite.
-- Die Places-API (`https://places-api.foursquare.com`, `FOURSQUARE_SERVICE_API_KEY`)
-  liefert dagegen für **alle 1036 Venues** Baseline-Details (200): aktueller
-  Name, Adresse, Stadt/Region/PLZ/Land, Koordinaten, Kategorien, Telefon (747),
-  Website (748), E-Mail (395) und Social-Media-IDs. Der Client liegt in
-  `places_api.py`.
-- Die Baseline wurde einmalig in `data/foursquare/places_api_venue_details.json`
-  gesichert und mit `foursquare venue-import` in die Tabelle `venue_details`
-  importiert (1036 Einträge, 811 mit Kontakt). Der Import ist idempotent, macht
-  keine API-Calls und überschreibt keine bestehenden Venue-Snapshots.
-- Die Detailseite `/venues/{id}` zeigt daraus Telefon, Website, E-Mail,
-  Social-Links, alle Kategorien und den Datenstand; leere Felder werden
-  ausgeblendet.
-- Hinweis zum Kontingent: Der einmalige Abruf aller 1036 Venues hat das
-  freePro-Kontingent aufgebraucht; weitere Detail-Calls liefern bis zum
-  Reset/Credits 429. Der Import aus JSON verbraucht kein Kontingent.
-- `places/search`, `autocomplete`, `places/match` und
-  `geotagging/candidates` antworten mit 200, `places/resolve` mit 401
-  (fehlende Berechtigung).
-- `foursquare probe` prüft die Konto-Endpunkte rein lesend; `friends`/`badges`
-  liefern 404, `events` 403, `likes`/`herenow` 402. Zusätzlich werden
-  Places-API-Baseline, Premium-Felder, Fotos und Tipps geprüft.
+- Known API gaps are documented in `sync_diagnostics` and shown in `stats`
+- Venue details (opening hours, price, rating, venue photos/tips) are currently
+  unavailable: `/v2/venues/{id}` returns 402, the Places API with premium
+  fields, `/photos`, `/tips`, and `/places/ask` return 429. The 1036 venue
+  snapshots from check-ins are sufficient for the list and detail page.
+- The Places API (`https://places-api.foursquare.com`,
+  `FOURSQUARE_SERVICE_API_KEY`) does provide baseline details (200) for **all
+  1036 venues**: current name, address, city/region/postal code/country,
+  coordinates, categories, phone (747), website (748), email (395), and social
+  media IDs. The client lives in `places_api.py`.
+- The baseline was saved once to `data/foursquare/places_api_venue_details.json`
+  and imported into the `venue_details` table with `foursquare venue-import`
+  (1036 entries, 811 with contact data). The import is idempotent, makes no API
+  calls, and does not overwrite existing venue snapshots.
+- The `/venues/{id}` detail page shows phone, website, email, social links, all
+  categories, and the data timestamp from it; empty fields are hidden.
+- Quota note: the one-time fetch of all 1036 venues exhausted the freePro quota;
+  further detail calls return 429 until the reset/credits. Importing from JSON
+  consumes no quota.
+- `places/search`, `autocomplete`, `places/match`, and `geotagging/candidates`
+  respond with 200, `places/resolve` with 401 (missing permission).
+- `foursquare probe` checks the account endpoints read-only; `friends`/`badges`
+  return 404, `events` 403, `likes`/`herenow` 402. It also checks the Places API
+  baseline, premium fields, photos, and tips.
 
-## Yelp-Import
+## 🟥 Yelp import
 
 ```bash
 python3 -m spot_history yelp import
-python3 -m spot_history index build       # Foursquare-Index für Namensmatches
-python3 -m spot_history yelp geocode      # Nominatim, max. 1 Request/s
-python3 -m spot_history index build       # Städte in den Index übernehmen
+python3 -m spot_history index build       # Foursquare index for name matching
+python3 -m spot_history yelp geocode      # Nominatim, max. 1 request/s
+python3 -m spot_history index build       # copy cities into the index
 python3 -m spot_history yelp stats
 ```
 
-Der HTML-Export wird über `YELP_EXPORT_DIR` (oder `--export-dir`) referenziert.
-Ohne Angabe gilt `data/yelp/export` relativ zum Repo.
+The HTML export is referenced via `YELP_EXPORT_DIR` (or `--export-dir`).
+Without it, `data/yelp/export` relative to the repository is used.
 
-- 462 Check-ins, 284 Orte, 92 mit Quellkoordinaten, 270 Medien
-- 20 Kommentare ohne Check-in werden als zusätzliche Visits importiert
-  (Badge „Kommentar“); 8 bereits verknüpfte Kommentare erscheinen am
-  jeweiligen Check-in-Visit
-- Zusätzlich importiert: 39 Survey-Antworten, 45 Business-Interaktionen,
-  36 Review-Feedback, 8 Foto-Feedback, 143 Komplimente, 25 Nachrichten,
-  3 Milestones, 2 Forumsbeiträge, 1 Profilfrage und die Kontodaten
-  (10 Felder; sensible Felder werden nicht im Web angezeigt)
-- 17 Quelltabellen ohne Daten (u. a. Reservierungen, Wartelisten, Tips) werden
-  mit Headern und Zeilenzahl in `source_tables` dokumentiert
-- 16 Yelp-Orte haben aus Lesezeichen/Sammlungen eine Business-URL; sie wird
-  beim Import in `places.place_url` gespeichert und als Quell-Link in den Index
-  übernommen
-- Das Yelp-`Datum` ist UTC; der Export enthält keinen Orts-Offset. In
-  `yelp.db` bleibt `tz_offset` deshalb `NULL`. Der Index löst die Lokalzeit auf
-  (gleicher Ort, Orts-Zeitzone, Stadt/Land, Umfeld-Mehrheit oder naher
-  Foursquare-Check-in); aktuell sind alle Yelp-Visits (482 inkl. 20
-  Kommentar-Visits) aufgelöst.
-- 306 Yelp-Kartenpunkte (alle 482 Yelp-Besuche inkl. Kommentar-Visits): 92 mit
-  Quellkoordinaten, 214 über den Ort abgeleitet (Badge „Ort abgeleitet“ in Liste
-  und Karte)
-- 316 von 462 Check-in-Visits mit Stadt: 135 über Nominatim, 181 über exakte
-  Namensmatches gegen Foursquare-Index und Export-URLs
-- 146 Check-in-Visits bleiben ohne Stadt, 176 Yelp-Besuche ohne Kartenpunkt
-- Der Geocoding-Cache liegt unter `data/yelp/` und ist gitignored;
-  `--force` erzwingt neue Nominatim-Requests
-- Review-IPs werden importiert; Account-/Login-IPs und deren Dateien bewusst
-  nicht. `--no-media` setzt `local_path` nur, wenn die Zieldatei existiert.
-- Unverknüpft bleiben 327 Check-ins ohne Koordinaten, 111 Orte/146 Visits
-  ohne Stadt sowie 20 Kommentare und 29 Medien. Business-IDs, Adressen,
-  Kategorien und Business-URLs fehlen im Export.
+- 462 check-ins, 284 places, 92 with source coordinates, 270 media files
+- 20 comments without a check-in are imported as additional visits (badge
+  `Kommentar`); 8 already linked comments appear on the respective check-in
+  visit
+- Also imported: 39 survey answers, 45 business interactions, 36 review
+  feedback entries, 8 photo feedback entries, 143 compliments, 25 messages,
+  3 milestones, 2 forum posts, 1 profile question, and the account data
+  (10 fields; sensitive fields are not shown in the web UI)
+- 17 source tables without data (including reservations, waitlists, tips) are
+  documented with headers and row counts in `source_tables`
+- 16 Yelp places have a business URL from bookmarks/collections; it is stored in
+  `places.place_url` during import and carried into the index as a source link
+- The Yelp `Datum` is UTC; the export contains no place offset. In `yelp.db`,
+  `tz_offset` therefore remains `NULL`. The index resolves local time (same
+  place, place time zone, city/country, neighborhood majority, or a nearby
+  Foursquare check-in); currently all Yelp visits (482 including 20 comment
+  visits) are resolved.
+- 306 Yelp map points (all 482 Yelp visits including comment visits): 92 with
+  source coordinates, 214 derived from the place (badge `Ort abgeleitet` in the
+  list and map)
+- 316 of 462 check-in visits with city: 135 via Nominatim, 181 via exact name
+  matches against the Foursquare index and export URLs
+- 146 check-in visits remain without a city, 176 Yelp visits without a map point
+- The geocoding cache lives under `data/yelp/` and is gitignored; `--force`
+  forces new Nominatim requests
+- Review IPs are imported; account/login IPs and their files deliberately are
+  not. `--no-media` only sets `local_path` when the target file exists.
+- Remaining unlinked: 327 check-ins without coordinates, 111 places/146 visits
+  without a city, and 20 comments and 29 media items. Business IDs, addresses,
+  categories, and business URLs are missing from the export.
 
-## Google-Timeline-Import
+## 🟩 Google Timeline import
 
-Google Timeline liegt seit der Migration 2024/25 nur noch auf dem Gerät. Es gibt
-keine API und keinen Web-Export; Google Takeout enthält nur den Altbestand vor
-der Migration. Der Import ist deshalb zweistufig: manueller Export aus der
-Google-Maps-App, danach automatischer Import und OSM-Anreicherung.
+Google Timeline has only existed on-device since the 2024/25 migration. There is
+no API and no web export; Google Takeout only contains the legacy data from
+before the migration. The import is therefore two-stage: a manual export from
+the Google Maps app, followed by automatic import and OSM enrichment.
 
-### Export vom iPhone
+### 📱 Export from iPhone
 
-1. Google Maps → Profil → Einstellungen → Standort & Datenschutz →
-   Timeline-Daten exportieren.
-2. Im iOS-Share-Sheet „In Dateien sichern“; die Datei heißt
-   `location-history.json` (oder `Timeline.json`).
-3. In einen Ordner speichern, der zu Linux synchronisiert (Dropbox, Nextcloud,
-   Google Drive + `rclone`; iCloud Drive ist nicht direkt mountbar).
-4. Auto-Delete in Timeline aus oder mindestens 36 Monate, sonst verschwinden
-   Daten vor dem nächsten Export.
+1. Google Maps → Profile → Settings → Location & privacy → Export Timeline
+   data.
+2. In the iOS share sheet, choose "Save to Files"; the file is called
+   `location-history.json` (or `Timeline.json`).
+3. Save it to a folder that syncs to Linux (Dropbox, Nextcloud, Google Drive +
+   `rclone`; iCloud Drive cannot be mounted directly).
+4. Turn off auto-delete in Timeline or set it to at least 36 months; otherwise
+   data disappears before the next export.
 
-Den Pfad setzt man in `.env`:
+Set the path in `.env`:
 
 ```env
 GOOGLE_TIMELINE_INBOX=/path/to/google-timeline
 ```
 
-Der Importer erkennt Dateien am Inhalt, nicht am Namen. Unterstützt werden der
-iPhone-Array-Export, `semanticSegments` (Android/Phone), Legacy-Takeout
-(`timelineObjects`/`placeVisit`) und GeoJSON aus Bewertungen/Gespeicherten
-Orten. `Records.json` (rohe GPS-Pings) und `@eaDir` werden übersprungen.
+The importer detects files by content, not by name. It supports the iPhone array
+export, `semanticSegments` (Android/Phone), legacy Takeout
+(`timelineObjects`/`placeVisit`), and GeoJSON from reviews/saved places.
+`Records.json` (raw GPS pings) and `@eaDir` are skipped.
 
-### Import und OSM-Anreicherung
+### 📥 Import and OSM enrichment
 
 ```bash
 python3 -m spot_history google scan
@@ -489,67 +476,62 @@ python3 -m spot_history google osm
 python3 -m spot_history google stats
 ```
 
-- `google import` baut `data/google/google.db` bei jedem Lauf neu aus allen
-  Dateien im Inbox-Ordner auf. Doppelte Visits werden über stabile IDs
-  zusammengefasst; Google-Place-IDs mit identischen Koordinaten (≤15 m) werden
-  zu einem Ort konsolidiert.
-- `Home` und `Work` werden als „Zuhause“/„Arbeit“ geführt; Adressen dieser
-  Orte werden nicht angezeigt.
-- `google osm` nutzt zuerst den vorhandenen Cache in `data/osm/osm.db`
-  (nur lesend), danach Overpass (`nwr(around:55)[name]`) und als Fallback
-  Nominatim-Reverse. Ergebnisse landen in `data/google/osm_cache.db`.
-- Automatisch übernommen werden nur eindeutige Treffer ≤25 m. Treffer zwischen
-  25 und 50 m sowie Mehrdeutiges landen als Kandidaten in
-  `google osm-candidates`; dort lassen sie sich mit `google osm-accept`
-  übernehmen.
-- Nominatim-Reverse-Treffer mit gültigem Namen und höchstens 50 m Abstand
-  übernehmen zusätzlich `osm_type` und `osm_id`. Diese Cluster werden dadurch
-  im Index als OSM-Orte geführt und mit gleichnamigen Quellen zusammengeführt.
-  Treffer über 50 m liefern weiterhin nur den Namen; Adress-Treffer erhalten
-  keine OSM-ID. Bereits verarbeitete Adress-Cluster werden ohne `--force` nicht
-  erneut abgefragt.
-- Bewertungen und gespeicherte Orte werden als `source_records` importiert,
-  auf Venue-Detailseiten angezeigt und innerhalb von 15 m als Namenshilfe
-  verwendet (eine Google-Bewertung kann einen ungenauen OSM-Namen ersetzen).
-  Der Google-Tab `/google` zeigt alle Bewertungen und gespeicherten Orte,
-  unabhängig davon, ob sie einem Ort zugeordnet werden konnten.
-- Manuelle Namen: `google name <cluster_key> "Name"` (optional mit
-  `--address`, `--city`, `--category`). Überschreibungen überleben jeden
-  Re-Import.
-- Es werden keine kostenpflichtigen APIs verwendet. Overpass/Nominatim werden
-  mit Cache, Batch-Größe und Pausen im Fair-Use-Rahmen genutzt; OSM-Daten
-  stehen unter ODbL („© OpenStreetMap contributors“).
-- Der Google-Maps-Link bleibt als `place_url` erhalten
-  (`...?api=1&query_place_id=...`), auch wenn kein Name gefunden wurde.
+- `google import` rebuilds `data/google/google.db` from all files in the inbox
+  folder on every run. Duplicate visits are merged via stable IDs; Google place
+  IDs with identical coordinates (≤15 m) are consolidated into one place.
+- `Home` and `Work` are shown as `Zuhause`/`Arbeit`; the addresses of these
+  places are not displayed.
+- `google osm` first uses the existing cache in `data/osm/osm.db` (read-only),
+  then Overpass (`nwr(around:55)[name]`) and Nominatim reverse as a fallback.
+  Results are stored in `data/google/osm_cache.db`.
+- Only unambiguous matches ≤25 m are accepted automatically. Matches between
+  25 and 50 m and ambiguous results become candidates in `google osm-candidates`;
+  they can be accepted there with `google osm-accept`.
+- Nominatim reverse matches with a valid name and at most 50 m distance also
+  adopt `osm_type` and `osm_id`. These clusters are then treated as OSM places in
+  the index and merged with similarly named sources. Matches over 50 m still
+  only provide the name; address matches receive no OSM ID. Already processed
+  address clusters are not queried again without `--force`.
+- Reviews and saved places are imported as `source_records`, shown on venue
+  detail pages, and used within 15 m as a name hint (a Google review can replace
+  an inaccurate OSM name). The Google tab `/google` shows all reviews and saved
+  places, regardless of whether they could be assigned to a place.
+- Manual names: `google name <cluster_key> "Name"` (optionally with `--address`,
+  `--city`, `--category`). Overrides survive every re-import.
+- No paid APIs are used. Overpass/Nominatim are used with cache, batch size, and
+  pauses within fair-use limits; OSM data is licensed under ODbL
+  ("© OpenStreetMap contributors").
+- The Google Maps link remains available as `place_url`
+  (`...?api=1&query_place_id=...`) even when no name was found.
 
-Bekannte Grenzen: Google liefert nur Place-ID + Koordinaten, keine Namen. Es
-gibt keine Google-ID→OSM-ID-Abbildung; die Zuordnung läuft über Koordinaten.
-In dichten Lagen kann der nächste OSM-POI falsch sein, deshalb werden
-25–50-m-Treffer nur als Kandidaten gespeichert. Viele Orte erhalten statt eines
-Venue-Namens eine Adresse (Straße + Hausnummer). Der iPhone-Export selbst
-bleibt manuell; `google.sh` übernimmt Import, OSM-Anreicherung und Index-Rebuild.
+Known limits: Google provides only a place ID + coordinates, no names. There is
+no Google ID → OSM ID mapping; matching is based on coordinates. In dense areas,
+the nearest OSM POI can be wrong, so 25–50 m matches are only stored as
+candidates. Many places receive an address (street + house number) instead of a
+venue name. The iPhone export itself remains manual; `google.sh` handles import,
+OSM enrichment, and index rebuild.
 
-## Weitere Quellen
+## 🧩 More sources
 
-Der Connector-Vertrag steht in [`CONNECTORS.md`](CONNECTORS.md). Connectoren
-werden automatisch unter `spot_history/connectors/*` entdeckt und müssen dort
-`CONNECTOR` exportieren.
+See [`CONNECTORS.md`](CONNECTORS.md) for the connector contract. Connectors are
+auto-discovered under `spot_history/connectors/*` and must export `CONNECTOR`
+there.
 
-## Tests
+## 🧪 Tests
 
 ```bash
 python3 -m unittest discover -s tests
 ```
 
-## Hinweise
+## 📝 Notes
 
-- `.env` und `data/` sind gitignored und gehören nicht ins Repository.
-- Das Roh-JSON enthält auch Namen von Nutzern, die Check-ins geliked haben.
-- Fotos werden in Originalauflösung geladen; `--no-photos` überspringt das.
-- Der Google-Timeline-Export bleibt manuell (iOS-Share-Sheet); `google.sh`
-  übernimmt danach Import, OSM-Anreicherung und Index-Rebuild.
-- Kein Cron/Daemon: Sync und Index werden manuell aufgerufen.
+- `.env` and `data/` are gitignored and must not be committed.
+- The raw JSON also contains names of users who liked check-ins.
+- Photos are loaded at original resolution; `--no-photos` skips this.
+- The Google Timeline export remains manual (iOS share sheet); `google.sh` then
+  handles import, OSM enrichment, and index rebuild.
+- No cron/daemon: sync and index builds are invoked manually.
 
-## License
+## 📄 License
 
 Licensed under the [MIT License](LICENSE) - Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
