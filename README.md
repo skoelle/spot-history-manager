@@ -99,6 +99,7 @@ For a persistent deployment, copy `docker-compose.example.yml` to
 The **Sync** page (`/sync`) starts jobs directly inside the container:
 
 - Foursquare: incremental sync, full backfill, pending photo downloads
+- Yelp: HTML export import, geocoding
 - Google: Timeline import from `data/google/inbox` (or `GOOGLE_TIMELINE_INBOX`),
   OSM enrichment
 - OpenStreetMap: `osm sync`
@@ -109,10 +110,14 @@ new data immediately. Only one job runs at a time; the page shows status,
 duration, a log excerpt, and a cancel button. Logs are also written to
 `data/sync/logs/`.
 
+The page also shows the time of the last successful import/sync for each
+source, read directly from the source databases.
+
 There is no automatic schedule. The web UI has no authentication, so protect it
 with a reverse proxy if it is exposed. For Google imports, place the export in
 `data/google/inbox` or mount it separately and point `GOOGLE_TIMELINE_INBOX` to
-the path inside the container.
+the path inside the container. The Yelp import expects the export in
+`data/yelp/export` or at `YELP_EXPORT_DIR`.
 
 ## 🗂️ Data layout
 

@@ -84,6 +84,7 @@ def _index_command(data_root: Path) -> tuple[str, ...]:
 def build_commands(action: str, data_root: Path) -> list[list[str]]:
     data_root = Path(data_root)
     foursquare_dir = str(data_root / "foursquare")
+    yelp_dir = str(data_root / "yelp")
     google_dir = str(data_root / "google")
     index_build = list(_index_command(data_root))
     commands: dict[str, list[list[str]]] = {
@@ -97,6 +98,14 @@ def build_commands(action: str, data_root: Path) -> list[list[str]]:
         ],
         "foursquare-photos": [
             ["foursquare", "photos", "--data-dir", foursquare_dir],
+            index_build,
+        ],
+        "yelp-import": [
+            ["yelp", "import", "--data-dir", yelp_dir],
+            index_build,
+        ],
+        "yelp-geocode": [
+            ["yelp", "geocode", "--data-dir", yelp_dir],
             index_build,
         ],
         "google-import": [
@@ -150,6 +159,21 @@ def build_actions(data_root: Path) -> tuple[SyncAction, ...]:
             ),
         ),
         SyncAction(
+            key="yelp-import",
+            label="Yelp Import",
+            description="Liest den HTML-Export aus data/yelp/export bzw. YELP_EXPORT_DIR ein.",
+            group="Yelp",
+            commands=tuple(tuple(cmd) for cmd in build_commands("yelp-import", data_root)),
+            confirm="Yelp-Import baut die Yelp-Datenbank neu. Fortfahren?",
+        ),
+        SyncAction(
+            key="yelp-geocode",
+            label="Yelp Geocode",
+            description="Ermittelt Städte und Koordinaten für Yelp-Orte über Nominatim.",
+            group="Yelp",
+            commands=tuple(tuple(cmd) for cmd in build_commands("yelp-geocode", data_root)),
+        ),
+        SyncAction(
             key="google-import",
             label="Google Import",
             description="Importiert den Timeline-Export aus data/google/inbox.",
@@ -194,20 +218,34 @@ def actions_by_key(data_root: Path) -> dict[str, SyncAction]:
 
 GROUP_HINTS = {
     "Foursquare": "Benötigt FOURSQUARE_OAUTH_TOKEN im Container.",
+    "Yelp": "Export unter data/yelp/export bzw. YELP_EXPORT_DIR.",
     "Google": "Importiert aus data/google/inbox bzw. GOOGLE_TIMELINE_INBOX.",
     "OpenStreetMap": "Abgleich offener Orte über Overpass/Nominatim.",
     "Index": "Wird nach jedem Sync automatisch ausgeführt.",
+}
+
+GROUP_KEYS = {
+    "Foursquare": "foursquare",
+    "Yelp": "yelp",
+    "Google": "google",
+    "OpenStreetMap": "osm",
+    "Index": "index",
 }
 
 
 def action_groups(data_root: Path) -> list[dict]:
     actions = build_actions(data_root)
     groups: list[dict] = []
-    for name in ("Foursquare", "Google", "OpenStreetMap", "Index"):
+    for name in ("Foursquare", "Yelp", "Google", "OpenStreetMap", "Index"):
         items = [action for action in actions if action.group == name]
         if items:
             groups.append(
-                {"name": name, "hint": GROUP_HINTS.get(name, ""), "actions": items}
+                {
+                    "key": GROUP_KEYS[name],
+                    "name": name,
+                    "hint": GROUP_HINTS.get(name, ""),
+                    "actions": items,
+                }
             )
     return groups
 

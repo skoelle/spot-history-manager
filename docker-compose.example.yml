@@ -26,3 +26,5 @@ services:
       FOURSQUARE_LEGACY_API_KEY: ${FOURSQUARE_LEGACY_API_KEY:-}
       # Default ist /app/data/google/inbox:
       # GOOGLE_TIMELINE_INBOX: /app/imports/google
+      # Default ist /app/data/yelp/export:
+      # YELP_EXPORT_DIR: /app/imports/yelp

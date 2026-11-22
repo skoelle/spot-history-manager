@@ -21,7 +21,7 @@ from ..core import places as place_core
 from ..core.config import build_paths
 from ..core.index import build_index
 from . import data as web_data
-from . import sync_jobs
+from . import sync_jobs, sync_status
 
 BASE = Path(__file__).resolve().parent
 paths = build_paths(os.environ.get("SPOT_HISTORY_DATA_ROOT"))
@@ -899,6 +899,7 @@ def sync_page(request: Request) -> HTMLResponse:
         {
             "request": request,
             "groups": sync_jobs.action_groups(paths.data_root),
+            "runs": sync_status.source_runs(paths.data_root),
             "data_root": str(paths.data_root),
         },
     )
@@ -929,7 +930,7 @@ def start_sync_form(request: Request, action: str) -> RedirectResponse:
 
 
 @app.get("/api/sync/status")
-def sync_status() -> dict:
+def sync_job_status() -> dict:
     return sync_runner.status()
 
 

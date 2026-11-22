@@ -14,6 +14,8 @@ ACTION_KEYS = {
     "foursquare-sync",
     "foursquare-backfill",
     "foursquare-photos",
+    "yelp-import",
+    "yelp-geocode",
     "google-import",
     "google-osm",
     "osm-sync",
@@ -32,6 +34,8 @@ class ActionTests(unittest.TestCase):
             "foursquare-sync",
             "foursquare-backfill",
             "foursquare-photos",
+            "yelp-import",
+            "yelp-geocode",
             "google-import",
             "google-osm",
             "osm-sync",
@@ -50,6 +54,8 @@ class ActionTests(unittest.TestCase):
     def test_data_dirs_are_explicit(self):
         foursquare = sync_jobs.build_commands("foursquare-sync", Path("/data"))[0]
         self.assertIn("/data/foursquare", foursquare)
+        yelp = sync_jobs.build_commands("yelp-import", Path("/data"))[0]
+        self.assertIn("/data/yelp", yelp)
         google = sync_jobs.build_commands("google-import", Path("/data"))[0]
         self.assertIn("/data/google", google)
 
@@ -57,6 +63,14 @@ class ActionTests(unittest.TestCase):
         groups = sync_jobs.action_groups(Path("/data"))
         grouped = {action.key for group in groups for action in group["actions"]}
         self.assertEqual(grouped, ACTION_KEYS)
+        self.assertEqual(
+            [group["name"] for group in groups],
+            ["Foursquare", "Yelp", "Google", "OpenStreetMap", "Index"],
+        )
+        self.assertEqual(
+            [group["key"] for group in groups],
+            ["foursquare", "yelp", "google", "osm", "index"],
+        )
 
 
 class JobRunnerTests(unittest.TestCase):

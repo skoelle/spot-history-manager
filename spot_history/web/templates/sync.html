@@ -26,6 +26,12 @@
         <div class="box sync-card">
             <div class="box-title">{{ group.name }}</div>
             {% if group.hint %}<p class="sync-description">{{ group.hint }}</p>{% endif %}
+            {% set run = runs.get(group.key) %}
+            {% if run %}
+            <p class="sync-last-run">{{ run.label }}:
+                {% if run.display %}<span class="sync-last-value">{{ run.display }}</span>{% else %}<span class="sync-last-value">—</span>{% endif %}
+            </p>
+            {% endif %}
             <div class="sync-actions">
                 {% for action in group.actions %}
                 <div class="sync-action">
