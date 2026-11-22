@@ -68,6 +68,14 @@ def _run_places(args: argparse.Namespace, connectors) -> int:
         return _run_osm_accept(args, paths, connectors)
     if command == "unmatched":
         return _run_unmatched(args, paths)
+    if command == "osm-state":
+        return _run_set_osm_state(args, paths, connectors)
+    if command == "osm-state-clear":
+        return _run_clear_osm_state(args, paths, connectors)
+    if command == "osm-states":
+        return _run_osm_states(args, paths)
+    if command == "mark-unresolved":
+        return _run_mark_unresolved(args, paths, connectors)
     if command == "audit":
         return _run_place_audit(args, paths)
     if command == "merge":
@@ -266,6 +274,13 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
             "SELECT COUNT(*) FROM canonical_places "
             "WHERE match_status != 'osm' AND has_osm_candidate = 1"
         ).fetchone()[0]
+        state_counts = {
+            row["place_state"]: int(row["n"])
+            for row in conn.execute(
+                "SELECT place_state, COUNT(*) AS n FROM canonical_places "
+                "GROUP BY place_state"
+            )
+        }
     finally:
         conn.close()
     rules = place_core.load_rules(paths.place_rules_db)
@@ -280,6 +295,8 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     print(f"Adresspunkte:      {address_places}")
     print(f"OSM-Kandidaten:    {candidate_places}")
     print(f"Ohne Vorschlag:    {without_suggestion}")
+    for state in ("open", "no_osm", "closed", "no_coords", "ignored"):
+        print(f"Status {state:<10} {state_counts.get(state, 0)}")
     print(f"Quell-Links:       {counts['place_links']} ({linked} mit URL)")
     print(f"Merge-Vorschläge:  {counts['merge_candidates']}")
     print(f"Manuelle Merges:   {manual_merges}")
@@ -412,13 +429,17 @@ def _run_unmatched(args: argparse.Namespace, paths) -> int:
     without_candidate = getattr(args, "without_candidate", False)
     if without_candidate:
         clauses.append("has_osm_candidate = 0")
+    state = getattr(args, "state", None)
+    if state:
+        clauses.append("place_state = ?")
+        params.append(state)
     limit = f" LIMIT {int(args.limit)}" if args.limit else ""
     try:
         rows = [
             dict(row)
             for row in conn.execute(
                 "SELECT canonical_key, name, city, match_status, osm_type, osm_id, "
-                "place_kind, has_osm_candidate "
+                "place_kind, has_osm_candidate, place_state "
                 "FROM canonical_places "
                 f"WHERE {' AND '.join(clauses)} "
                 "ORDER BY city, name"
@@ -437,11 +458,125 @@ def _run_unmatched(args: argparse.Namespace, paths) -> int:
     for row in rows:
         suffix = " [Adresse]" if row["place_kind"] == "address" else ""
         proposal = " +Kandidat" if row["has_osm_candidate"] else ""
+        state = "" if row["place_state"] == "open" else f" [{row['place_state']}]"
         print(
             f"{row['canonical_key']}  {row['name'] or '-'}  "
-            f"[{row['city'] or '-'}, {row['match_status']}{suffix}{proposal}]"
+            f"[{row['city'] or '-'}, {row['match_status']}{suffix}{proposal}{state}]"
         )
     return 0
+
+
+def _run_set_osm_state(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+        identity.set_osm_state(
+            paths.place_identity_db,
+            source,
+            source_place_id,
+            args.state,
+            reason=args.reason,
+            note=args.note,
+        )
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    print(f"OSM-Status gesetzt: {args.place} -> {args.state}")
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_clear_osm_state(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    deleted = identity.delete_osm_state(
+        paths.place_identity_db, source, source_place_id
+    )
+    print(
+        f"OSM-Status entfernt: {args.place}"
+        if deleted
+        else f"Kein OSM-Status vorhanden: {args.place}"
+    )
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_osm_states(args: argparse.Namespace, paths) -> int:
+    states = identity.load_osm_states(paths.place_identity_db)
+    rows = [
+        {"source": source, "source_place_id": place_id, **info}
+        for (source, place_id), info in sorted(states.items())
+        if not args.state or info["state"] == args.state
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["state"]] = counts.get(row["state"], 0) + 1
+    for state in sorted(counts):
+        print(f"{state:<12} {counts[state]}")
+    print(f"Gesamt:      {len(rows)}")
+    return 0
+
+
+def _run_mark_unresolved(args: argparse.Namespace, paths, connectors) -> int:
+    conn = _index_connection(paths.index_db)
+    if conn is None:
+        print(f"Kein Index vorhanden: {paths.index_db}", file=sys.stderr)
+        return 1
+    clauses = [
+        "match_status != 'osm'",
+        "place_kind = 'venue'",
+        "has_osm_candidate = 0",
+        "place_state = 'open'",
+    ]
+    params: list = []
+    if args.source:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM place_links pl "
+            "WHERE pl.canonical_id = p.id AND pl.source = ?)"
+        )
+        params.append(args.source)
+    limit = f" LIMIT {int(args.limit)}" if args.limit else ""
+    try:
+        rows = conn.execute(
+            "SELECT p.id, p.canonical_key, p.name FROM canonical_places p "
+            f"WHERE {' AND '.join(clauses)} ORDER BY p.name{limit}",
+            params,
+        ).fetchall()
+        members: list[tuple[str, str]] = []
+        for row in rows:
+            for link in conn.execute(
+                "SELECT source, source_place_id FROM place_links "
+                "WHERE canonical_id = ?",
+                (row["id"],),
+            ):
+                members.append((link["source"], link["source_place_id"]))
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps([dict(row) for row in rows], ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print("Keine offenen, ungelösten Venues gefunden.")
+        return 0
+    print(f"{len(rows)} Orte -> Status {args.state}")
+    if args.dry_run:
+        for row in rows:
+            print(f"  {row['canonical_key']}  {row['name'] or '-'}")
+        print("Dry-Run: keine Statusänderungen geschrieben.")
+        return 0
+    for source, source_place_id in members:
+        identity.set_osm_state(
+            paths.place_identity_db,
+            source,
+            source_place_id,
+            args.state,
+            reason="mark-unresolved",
+            note=args.note,
+        )
+    return 0 if args.no_build else _rebuild_index(args, connectors)
 
 
 def _run_thumbs(args: argparse.Namespace) -> int:
@@ -625,9 +760,66 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="nur Orte ohne OSM-Kandidat",
     )
+    unmatched_parser.add_argument("--state", choices=identity.OSM_STATES)
     unmatched_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
     unmatched_parser.add_argument("--json", action="store_true")
     unmatched_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    osm_state_parser = place_commands.add_parser(
+        "osm-state", help="OSM-Status eines Quell-Orts setzen"
+    )
+    osm_state_parser.add_argument("place", help="source:id des Quell-Orts")
+    osm_state_parser.add_argument(
+        "state",
+        choices=identity.OSM_STATES,
+        help="open, no_osm, closed, no_coords oder ignored",
+    )
+    osm_state_parser.add_argument("--reason", help="Grund")
+    osm_state_parser.add_argument("--note", help="Notiz")
+    osm_state_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    osm_state_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    osm_state_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    osm_state_clear_parser = place_commands.add_parser(
+        "osm-state-clear", help="OSM-Status eines Quell-Orts entfernen"
+    )
+    osm_state_clear_parser.add_argument("place", help="source:id des Quell-Orts")
+    osm_state_clear_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    osm_state_clear_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    osm_state_clear_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    osm_states_parser = place_commands.add_parser(
+        "osm-states", help="gesetzte OSM-Status anzeigen"
+    )
+    osm_states_parser.add_argument("--state", choices=identity.OSM_STATES)
+    osm_states_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    osm_states_parser.add_argument("--json", action="store_true")
+    osm_states_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    mark_parser = place_commands.add_parser(
+        "mark-unresolved",
+        help="offene Venues ohne OSM/Kandidat gesammelt markieren",
+    )
+    mark_parser.add_argument(
+        "--state",
+        choices=("no_osm", "closed", "ignored"),
+        default="no_osm",
+        help="Zielstatus (default: no_osm)",
+    )
+    mark_parser.add_argument("--source", help="nur Orte dieser Quelle")
+    mark_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte")
+    mark_parser.add_argument("--note", help="Notiz")
+    mark_parser.add_argument("--dry-run", action="store_true")
+    mark_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    mark_parser.add_argument("--json", action="store_true")
+    mark_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    mark_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     audit_parser = place_commands.add_parser(
         "audit", help="verdächtige, noch nicht gemergte Orts-Duplikate anzeigen"

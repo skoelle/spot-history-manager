@@ -216,6 +216,7 @@ def venues(
     match: str | None = None,
     kind: str | None = None,
     without_candidate: str | None = None,
+    state: str | None = None,
     page: int = 1,
 ) -> HTMLResponse:
     index_db = paths.index_db
@@ -259,6 +260,9 @@ def venues(
         "on",
         "yes",
     )
+    state_value = (state or "").strip() or None
+    if state_value not in identity.OSM_STATES:
+        state_value = None
     conn = web_data.connect(index_db)
     try:
         profiles = web_data.load_profiles(conn)
@@ -277,6 +281,7 @@ def venues(
             match=match_value,
             kind=kind_value,
             without_candidate=without_candidate_value,
+            state=state_value,
         )
         total = web_data.count_venues(conn, filters)
         pages = max(1, (total + web_data.PAGE_SIZE - 1) // web_data.PAGE_SIZE)
@@ -296,6 +301,7 @@ def venues(
         "match": match_value or "",
         "kind": kind_value or "",
         "without_candidate": "1" if without_candidate_value else "",
+        "state": state_value or "",
     }
     return templates.TemplateResponse(
         request,
@@ -586,6 +592,57 @@ async def clear_venue_osm(request: Request, key: str) -> RedirectResponse:
     if not updated:
         return _redirect_venue(venue["key"], assign_error="Ort nach Rebuild nicht gefunden.")
     message = "Zuordnung entfernt." if removed else "Keine Zuordnung vorhanden."
+    return _redirect_venue(updated["key"], assign_ok=message)
+
+
+@app.post("/venues/{key}/state")
+async def set_venue_state(request: Request, key: str) -> RedirectResponse:
+    _check_same_origin(request)
+    raw = (await _form_value(request, "state")).strip()
+    index_db = paths.index_db
+    if not index_db.exists():
+        raise HTTPException(status_code=503, detail="Index missing")
+    conn = web_data.connect(index_db)
+    try:
+        venue = web_data.get_venue_by_key(conn, key)
+        if not venue:
+            raise HTTPException(status_code=404, detail="Venue not found")
+        members = web_data.venue_members(conn, venue["id"])
+    finally:
+        conn.close()
+    if raw and raw not in identity.OSM_STATES:
+        return _redirect_venue(venue["key"], assign_error="Ungültiger Status.")
+    if not members:
+        return _redirect_venue(
+            venue["key"], assign_error="Kein Quell-Ort für diese Änderung."
+        )
+    for member in members:
+        if raw in ("", "open"):
+            identity.delete_osm_state(
+                paths.place_identity_db,
+                member["source"],
+                member["source_place_id"],
+            )
+        else:
+            identity.set_osm_state(
+                paths.place_identity_db,
+                member["source"],
+                member["source_place_id"],
+                raw,
+                reason="web",
+            )
+    try:
+        _rebuild_index()
+    except Exception as exc:  # noqa: BLE001 - Fehler im UI anzeigen
+        return _redirect_venue(
+            venue["key"], assign_error=f"Index-Rebuild fehlgeschlagen: {exc}"
+        )
+    updated = _venue_after_rebuild(index_db, venue["key"], members)
+    if not updated:
+        return _redirect_venue(
+            venue["key"], assign_error="Ort nach Rebuild nicht gefunden."
+        )
+    message = "Status entfernt." if raw in ("", "open") else f"Status: {raw}"
     return _redirect_venue(updated["key"], assign_ok=message)
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..core.categories import GROUP_RANK
 from ..core.config import ROOT
+from ..core.identity import OSM_STATES
 from ..core.media import is_video, thumb_relpath
 from ..core.naming import name_similarity
 from ..core.places import haversine_m
@@ -44,6 +45,7 @@ class VenueFilters:
     match: str | None = None
     kind: str | None = None
     without_candidate: bool = False
+    state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -546,6 +548,9 @@ def venue_where_clause(filters: VenueFilters) -> tuple[str, list]:
     if filters.without_candidate:
         clauses.append("p.match_status != 'osm'")
         clauses.append("p.has_osm_candidate = 0")
+    if filters.state:
+        clauses.append("p.place_state = ?")
+        params.append(filters.state)
     if filters.q:
         like = f"%{filters.q}%"
         clauses.append(
@@ -620,6 +625,16 @@ def load_venue_match_counts(conn: sqlite3.Connection) -> dict:
     if extra is not None:
         counts["address"] = int(extra["address"] or 0)
         counts["without_suggestion"] = int(extra["without_suggestion"] or 0)
+    counts["states"] = {state: 0 for state in OSM_STATES}
+    try:
+        state_rows = conn.execute(
+            "SELECT place_state, COUNT(*) AS n FROM canonical_places "
+            "GROUP BY place_state"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return counts
+    for row in state_rows:
+        counts["states"][row["place_state"]] = int(row["n"])
     return counts
 
 
@@ -731,6 +746,7 @@ VENUE_SELECT = (
     "p.lat AS source_lat, p.lng AS source_lng, p.osm_lat, p.osm_lng, "
     "p.sources_json, p.source_count, p.osm_type, p.osm_id, "
     "p.match_status, p.place_kind, p.has_osm_candidate, "
+    "p.place_state, p.place_state_reason, "
     "COUNT(v.id) AS visits_count, MIN(v.visited_at) AS first_visit, "
     "MAX(v.visited_at) AS last_visit, "
     "(SELECT COUNT(*) FROM photos ph JOIN visits pv ON pv.id = ph.visit_id "
@@ -1131,6 +1147,8 @@ def _format_venue(
         "match_status": row["match_status"],
         "place_kind": row["place_kind"],
         "has_osm_candidate": bool(row["has_osm_candidate"]),
+        "place_state": row["place_state"],
+        "place_state_reason": row["place_state_reason"],
         "osm_url": (
             f"https://www.openstreetmap.org/{row['osm_type']}/{row['osm_id']}"
             if row["osm_type"] and row["osm_id"] is not None

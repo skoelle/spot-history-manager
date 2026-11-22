@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 OSM_TYPES = ("node", "way", "relation")
+OSM_STATES = ("open", "no_osm", "closed", "no_coords", "ignored")
 
 IDENTITY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS place_osm (
@@ -49,6 +50,16 @@ CREATE TABLE IF NOT EXISTS canonical_alias (
     alias_key TEXT PRIMARY KEY,
     canonical_key TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS place_osm_state (
+    source TEXT NOT NULL,
+    source_place_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    reason TEXT,
+    note TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, source_place_id)
 );
 """
 
@@ -339,6 +350,74 @@ def load_osm_candidate_keys(path: Path) -> set[tuple[str, str]]:
         (row["source"], row["source_place_id"])
         for row in load_osm_candidates(path)
     }
+
+
+def set_osm_state(
+    path: Path,
+    source: str,
+    source_place_id: str,
+    state: str,
+    *,
+    reason: str | None = None,
+    note: str | None = None,
+) -> None:
+    if state not in OSM_STATES:
+        raise ValueError(f"Ungültiger OSM-Status: {state!r}")
+    stamp = now_iso()
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO place_osm_state "
+                "(source, source_place_id, state, reason, note, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, source_place_id) DO UPDATE SET "
+                "state=excluded.state, reason=excluded.reason, note=excluded.note, "
+                "updated_at=excluded.updated_at",
+                (source, source_place_id, state, reason, note, stamp),
+            )
+    finally:
+        conn.close()
+
+
+def load_osm_states(path: Path) -> dict[tuple[str, str], dict]:
+    conn = _read_connection(path)
+    if conn is None:
+        return {}
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT source, source_place_id, state, reason, note, updated_at "
+                "FROM place_osm_state"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    return {
+        (row["source"], row["source_place_id"]): {
+            "state": row["state"],
+            "reason": row["reason"],
+            "note": row["note"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    }
+
+
+def delete_osm_state(path: Path, source: str, source_place_id: str) -> bool:
+    if not path.exists():
+        return False
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM place_osm_state WHERE source=? AND source_place_id=?",
+                (source, source_place_id),
+            )
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def record_aliases(path: Path, aliases: dict[str, str]) -> None:

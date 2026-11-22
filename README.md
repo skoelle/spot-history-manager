@@ -319,6 +319,14 @@ python3 -m spot_history osm rematch
 python3 -m spot_history osm net-scan --dry-run --verbose
 python3 -m spot_history osm net-scan --limit 50
 
+# Address successors and contact matches (candidates only)
+python3 -m spot_history osm address-scan --dry-run --verbose
+python3 -m spot_history osm contact-scan --dry-run --verbose
+
+# Run all stages, then mark venues without coordinates as no_coords
+python3 -m spot_history osm deep-scan --dry-run --verbose
+python3 -m spot_history osm deep-scan
+
 # Then copy OSM keys into the index
 python3 -m spot_history index build
 
@@ -332,6 +340,12 @@ python3 -m spot_history places unmatched --kind venue --without-candidate
 python3 -m spot_history places osm-accept foursquare:<venue_id>
 python3 -m spot_history places assign-osm foursquare:<venue_id> way/247857140
 python3 -m spot_history places unassign-osm foursquare:<venue_id>
+
+# Persisted OSM states for confirmed cases
+python3 -m spot_history places osm-state foursquare:<venue_id> no_osm --note "..."
+python3 -m spot_history places osm-state-clear foursquare:<venue_id>
+python3 -m spot_history places osm-states
+python3 -m spot_history places mark-unresolved --state no_osm --dry-run
 ```
 
 - `osm sync` only reads the index and writes exclusively to `data/osm/osm.db`
@@ -354,6 +368,21 @@ python3 -m spot_history places unassign-osm foursquare:<venue_id>
   (up to `--max-distance`, default 2000 m) are only stored as candidates, never
   assigned automatically. The cache and rate limit are respected; `--force`
   ignores the Nominatim cache.
+- `osm address-scan` looks up the street address of unresolved venues and stores
+  valid OSM venues within 150 m as `address_match` candidates. Only matching
+  category families (e.g. restaurants/cafés/bars) are accepted, so a successor
+  at the same address can be suggested without matching a bakery to a doctor's
+  office. Candidates are never assigned automatically.
+- `osm contact-scan` matches website domains, normalized phone numbers and
+  e-mail addresses from `place_details` against OSM contact tags within 2 km.
+  Social and directory domains are ignored; matches are candidates only.
+- `osm deep-scan` runs rematch, name, address and contact stages in order and
+  marks open venues without coordinates as `no_coords` unless
+  `--no-mark-no-coords` is given.
+- `places osm-state` persists `open`, `no_osm`, `closed`, `no_coords` or
+  `ignored` per source place; the index exposes this as `place_state` and the UI
+  has status filters. `places mark-unresolved` can bulk-mark the remaining open
+  venues without OSM ID and candidate (default `no_osm`).
 - `--force` ignores the query cache; `--dry-run` only matches and writes no
   assignments. The place list has filters for place kind (venue/address) and
   "without OSM suggestion".

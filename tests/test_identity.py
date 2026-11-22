@@ -8,11 +8,14 @@ from pathlib import Path
 
 from spot_history.core.identity import (
     delete_osm_assignment,
+    delete_osm_state,
     load_aliases,
     load_osm_assignments,
+    load_osm_states,
     local_key,
     parse_osm_ref,
     record_aliases,
+    set_osm_state,
     upsert_osm_assignment,
     validate_osm,
 )
@@ -69,6 +72,24 @@ class IdentityTest(unittest.TestCase):
             self.assertTrue(delete_osm_assignment(path, "foursquare", "v1"))
             self.assertEqual(load_osm_assignments(path), {})
             self.assertFalse(delete_osm_assignment(path, "foursquare", "v1"))
+
+    def test_osm_state_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "places" / "identity.db"
+            self.assertEqual(load_osm_states(path), {})
+            set_osm_state(
+                path, "yelp", "y1", "no_coords", reason="auto:no_coords"
+            )
+            states = load_osm_states(path)
+            self.assertEqual(states[("yelp", "y1")]["state"], "no_coords")
+            self.assertEqual(
+                states[("yelp", "y1")]["reason"], "auto:no_coords"
+            )
+            with self.assertRaises(ValueError):
+                set_osm_state(path, "yelp", "y1", "unknown")
+            self.assertTrue(delete_osm_state(path, "yelp", "y1"))
+            self.assertEqual(load_osm_states(path), {})
+            self.assertFalse(delete_osm_state(path, "yelp", "y1"))
 
 
 if __name__ == "__main__":

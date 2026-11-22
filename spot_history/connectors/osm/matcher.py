@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,7 @@ from .db import Poi, haversine_m
 
 AUTO_SCORE = 0.80
 CANDIDATE_SCORE = 0.55
+WEAK_CANDIDATE_SCORE = 0.50
 AMBIGUOUS_MARGIN = 0.05
 FUZZY_MIN_SIMILARITY = 0.70
 
@@ -29,6 +31,7 @@ class IndexPlace:
     category: str | None = None
     osm_type: str | None = None
     osm_id: int | None = None
+    place_state: str = "open"
     members: list[tuple[str, str]] = field(default_factory=list)
 
     @property
@@ -47,6 +50,7 @@ class Match:
     name_tag: str = "name"
     alternate: bool = False
     fuzzy: bool = False
+    variant: bool = False
 
 
 def load_index_places(index_db: Path) -> list[IndexPlace]:
@@ -57,7 +61,7 @@ def load_index_places(index_db: Path) -> list[IndexPlace]:
     try:
         rows = conn.execute(
             "SELECT id, canonical_key, name, lat, lng, city, postal_code, "
-            "address, category, osm_type, osm_id FROM canonical_places "
+            "address, category, osm_type, osm_id, place_state FROM canonical_places "
             "WHERE name IS NOT NULL AND name != ''"
         ).fetchall()
         links = conn.execute(
@@ -84,15 +88,40 @@ def load_index_places(index_db: Path) -> list[IndexPlace]:
             category=row["category"],
             osm_type=row["osm_type"],
             osm_id=row["osm_id"],
+            place_state=row["place_state"],
             members=members.get(int(row["id"]), []),
         )
         for row in rows
     ]
 
 
+_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+_PAREN_RE = re.compile(r"\([^)]*\)")
+
+
 def _tokens(value: str | None) -> set[str]:
     normalized = normalize_name(value)
-    return {token for token in normalized.split() if len(token) > 1}
+    return {token for token in _SPLIT_RE.split(normalized) if len(token) > 1}
+
+
+def _name_variants(value: str | None) -> list[str]:
+    text = (value or "").strip()
+    if not text:
+        return []
+    variants = [text]
+    without_parens = _PAREN_RE.sub(" ", text).strip()
+    if without_parens and without_parens != text:
+        variants.append(without_parens)
+    for separator in (" - ", " | ", " – ", " — "):
+        if separator in text:
+            head = text.split(separator, 1)[0].strip()
+            if head and head not in variants:
+                variants.append(head)
+    for match in _PAREN_RE.finditer(text):
+        inner = match.group(0)[1:-1].strip()
+        if inner and inner not in variants:
+            variants.append(inner)
+    return variants
 
 
 def name_similarity(left: str | None, right: str | None) -> float:
@@ -127,24 +156,26 @@ def _name_match(
     *,
     allow_alt: bool,
     allow_fuzzy: bool,
-) -> tuple[float, str, str, bool]:
-    best = (0.0, poi.name, "name", False)
-    variants = poi.name_variants() if allow_alt else [(poi.name, "name")]
-    for value, tag in variants:
-        base = name_similarity(place_name, value)
-        fuzzy = (
-            _fuzzy_similarity(place_name, value)
-            if allow_fuzzy and base < FUZZY_MIN_SIMILARITY
-            else 0.0
-        )
-        if fuzzy >= FUZZY_MIN_SIMILARITY and fuzzy > base:
-            similarity, is_fuzzy = fuzzy, True
-        elif base > 0.0:
-            similarity, is_fuzzy = base, False
-        else:
-            continue
-        if similarity > best[0]:
-            best = (similarity, value, tag, is_fuzzy)
+) -> tuple[float, str, str, bool, bool]:
+    best = (0.0, poi.name, "name", False, False)
+    poi_variants = poi.name_variants() if allow_alt else [(poi.name, "name")]
+    place_variants = _name_variants(place_name) or [place_name or ""]
+    for value, tag in poi_variants:
+        for index, place_variant in enumerate(place_variants):
+            base = name_similarity(place_variant, value)
+            fuzzy = (
+                _fuzzy_similarity(place_variant, value)
+                if allow_fuzzy and base < FUZZY_MIN_SIMILARITY
+                else 0.0
+            )
+            if fuzzy >= FUZZY_MIN_SIMILARITY and fuzzy > base:
+                similarity, is_fuzzy = fuzzy, True
+            elif base > 0.0:
+                similarity, is_fuzzy = base, False
+            else:
+                continue
+            if similarity > best[0]:
+                best = (similarity, value, tag, is_fuzzy, index > 0)
     return best
 
 
@@ -165,12 +196,12 @@ def score_poi(
     if looks_like_address(place.name):
         return None
 
-    similarity, matched_name, name_tag, fuzzy = _name_match(
+    similarity, matched_name, name_tag, fuzzy, variant = _name_match(
         place.name, poi, allow_alt=allow_alt, allow_fuzzy=allow_fuzzy
     )
     if similarity <= 0.0:
         return None
-    alternate = name_tag != "name"
+    alternate = name_tag != "name" or variant
 
     name_score = 0.6 if similarity >= 0.99 else 0.5 * similarity
 
@@ -203,8 +234,10 @@ def score_poi(
     suffix = "_distance" if distance_m is not None else "_city"
     if fuzzy:
         reason = "fuzzy" + suffix
-    elif alternate:
+    elif name_tag != "name":
         reason = "alt_name" + suffix
+    elif variant:
+        reason = "name_variant" + suffix
     else:
         reason = "name" + suffix
     return Match(
@@ -217,6 +250,7 @@ def score_poi(
         name_tag=name_tag,
         alternate=alternate,
         fuzzy=fuzzy,
+        variant=variant,
     )
 
 

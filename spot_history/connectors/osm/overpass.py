@@ -158,6 +158,10 @@ def parse_nominatim_results(payload: list[dict]) -> list[Poi]:
             for key, value in extratags.items()
             if value is not None
         }
+        category = item.get("category")
+        osm_class = item.get("type")
+        if category and osm_class:
+            tags.setdefault(str(category), str(osm_class))
         city = (
             address.get("city")
             or address.get("town")
@@ -177,6 +181,7 @@ def parse_nominatim_results(payload: list[dict]) -> list[Poi]:
             tags.setdefault("addr:housenumber", str(house_number))
         name = (
             (item.get("namedetails") or {}).get("name")
+            or item.get("name")
             or tags.get("name")
             or (item.get("display_name") or "").split(",")[0]
         )

@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from spot_history.connectors.base import BaseConnector, Photo, Visit
 from spot_history.connectors.osm import db as osm_db
 from spot_history.core.config import build_paths
-from spot_history.core.identity import upsert_osm_assignment, upsert_osm_candidate
+from spot_history.core.identity import (
+    set_osm_state,
+    upsert_osm_assignment,
+    upsert_osm_candidate,
+)
 from spot_history.core.index import build_index
 from spot_history.core.media import thumb_relpath
 from spot_history.core.places import PlaceRule, upsert_rule
@@ -807,6 +811,36 @@ class WebDataTest(unittest.TestCase):
                 self.assertFalse(by_name["Veilchenweg"]["has_osm_candidate"])
                 self.assertEqual(by_name["Cafe Test"]["place_kind"], "venue")
                 self.assertTrue(by_name["Cafe Test"]["has_osm_candidate"])
+            finally:
+                conn.close()
+
+    def test_place_state_filter_and_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            set_osm_state(
+                paths.place_identity_db,
+                "fake",
+                "p1",
+                "closed",
+                reason="test",
+            )
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                counts = web_data.load_venue_match_counts(conn)
+                self.assertEqual(counts["states"]["closed"], 1)
+                self.assertEqual(
+                    web_data.count_venues(
+                        conn, web_data.VenueFilters(state="closed")
+                    ),
+                    1,
+                )
+                venues = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Michaeligarten"), limit=5, offset=0
+                )
+                self.assertEqual(venues[0]["place_state"], "closed")
+                self.assertEqual(venues[0]["place_state_reason"], "test")
             finally:
                 conn.close()
 

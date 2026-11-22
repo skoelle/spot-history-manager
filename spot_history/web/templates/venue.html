@@ -45,6 +45,10 @@
             </span>
             {% endif %}
             {% if venue.place_kind == 'address' %}<span class="badge derived">Adresse</span>{% endif %}
+            {% if venue.place_state == 'no_osm' %}<span class="badge derived" {% if venue.place_state_reason %}title="{{ venue.place_state_reason }}"{% endif %}>kein OSM-Objekt</span>
+            {% elif venue.place_state == 'closed' %}<span class="badge derived">geschlossen</span>
+            {% elif venue.place_state == 'no_coords' %}<span class="badge derived">ohne Geodaten</span>
+            {% elif venue.place_state == 'ignored' %}<span class="badge derived">ignoriert</span>{% endif %}
             {% if venue.osm_url %}
             <span>OSM: <a href="{{ venue.osm_url }}" target="_blank" rel="noopener">{{ venue.osm_type }}/{{ venue.osm_id }}</a></span>
             {% elif venue.match_status == 'conflict' %}
@@ -305,7 +309,14 @@
                         {% if candidate.distance_m is not none %} · {{ "%.0f"|format(candidate.distance_m) }} m{% endif %}
                         {% if candidate.reason and candidate.reason.startswith('alt_name') %} · über Alt-/Alternativnamen
                         {% elif candidate.reason and candidate.reason.startswith('fuzzy') %} · unscharfer Namensvergleich
+                        {% elif candidate.reason and candidate.reason.startswith('name_variant') %} · Namensvariante
+                        {% elif candidate.reason and candidate.reason.startswith('address_match') %} · gleiche Adresse, anderer Name
+                        {% elif candidate.reason and candidate.reason.startswith('website_match') %} · Website-Treffer
+                        {% elif candidate.reason and candidate.reason.startswith('phone_match') %} · Telefon-Treffer
+                        {% elif candidate.reason and candidate.reason.startswith('email_match') %} · E-Mail-Treffer
                         {% endif %}
+                        {% if candidate.reason and candidate.reason.endswith('_far') %} · weiter entfernt{% endif %}
+                        {% if candidate.reason and candidate.reason.endswith('_weak') %} · schwacher Treffer{% endif %}
                     </span>
                     <button type="submit">Übernehmen</button>
                 </form>
@@ -320,6 +331,19 @@
             {% endfor %}
         </div>
         {% endif %}
+        <form class="osm-form" method="post" action="/venues/{{ venue.key }}/state">
+            <label class="field field-search">
+                <span>Status</span>
+                <select name="state">
+                    <option value="open" {% if venue.place_state == 'open' %}selected{% endif %}>Offen</option>
+                    <option value="no_osm" {% if venue.place_state == 'no_osm' %}selected{% endif %}>Kein OSM-Objekt</option>
+                    <option value="closed" {% if venue.place_state == 'closed' %}selected{% endif %}>Geschlossen</option>
+                    <option value="no_coords" {% if venue.place_state == 'no_coords' %}selected{% endif %}>Ohne Geodaten</option>
+                    <option value="ignored" {% if venue.place_state == 'ignored' %}selected{% endif %}>Ignoriert</option>
+                </select>
+            </label>
+            <button type="submit">Status speichern</button>
+        </form>
     </div>
     {% endif %}
 

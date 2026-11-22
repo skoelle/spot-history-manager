@@ -13,6 +13,7 @@ from spot_history.connectors.osm.matcher import (
     IndexPlace,
     decide,
     direct_candidates,
+    load_index_places,
     name_similarity,
     rank_matches,
 )
@@ -21,7 +22,15 @@ from spot_history.connectors.osm.overpass import (
     parse_nominatim_results,
     parse_overpass_elements,
 )
-from spot_history.connectors.osm.sync import net_scan, rematch, sync
+from spot_history.connectors.osm.sync import (
+    address_scan,
+    contact_scan,
+    deep_scan,
+    mark_missing_coords,
+    net_scan,
+    rematch,
+    sync,
+)
 from spot_history.core import identity
 from spot_history.core.config import build_paths
 from spot_history.core.index import build_index
@@ -42,6 +51,7 @@ class FakeConnector(BaseConnector):
             place_name="Testort",
             source_place_id="p1",
             category="Café",
+            address="Teststraße 1",
             city="München",
             country_code="DE",
         )
@@ -63,6 +73,53 @@ class AddressConnector(BaseConnector):
             city="Vaterstetten",
             country_code="DE",
         )
+
+
+class NoCoordConnector(BaseConnector):
+    name = "nocoord"
+    kind = "import"
+
+    def iter_visits(self):
+        yield Visit(
+            source="nocoord",
+            source_visit_id="n1",
+            visited_at=1700000000,
+            lat=None,
+            lng=None,
+            place_name="Testort",
+            source_place_id="n1",
+            category="Café",
+        )
+
+
+class ContactConnector(BaseConnector):
+    name = "contact"
+    kind = "import"
+
+    def iter_visits(self):
+        yield Visit(
+            source="contact",
+            source_visit_id="c1",
+            visited_at=1700000000,
+            lat=48.1,
+            lng=11.5,
+            place_name="Testort",
+            source_place_id="c1",
+            category="Café",
+            city="München",
+            country_code="DE",
+        )
+
+    def iter_place_details(self):
+        yield {
+            "source": "contact",
+            "source_place_id": "c1",
+            "website": "https://www.testort.example/",
+            "tel": "+49 89 123456",
+            "email": "info@testort.example",
+            "address": "Teststraße 1",
+            "city": "München",
+        }
 
 
 def place(name="Testort", lat=48.1, lng=11.5, city="München"):
@@ -155,6 +212,37 @@ class MatcherTest(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertTrue(match.fuzzy)
         self.assertTrue(match.reason.startswith("fuzzy"))
+
+    def test_punctuation_and_word_order_match_as_candidate(self):
+        gop = osm_db.Poi(
+            osm_type="node",
+            osm_id=291364396,
+            name="GOP Theater und Varieté",
+            lat=48.1379771,
+            lng=11.5879705,
+            tags={"amenity": "theatre", "addr:city": "München"},
+        )
+        match_place = place(
+            name="GOP Varieté-Theater", lat=48.138204, lng=11.588023
+        )
+        from spot_history.connectors.osm.db import haversine_m
+
+        distance = haversine_m(
+            match_place.lat, match_place.lng, gop.lat, gop.lng
+        )
+        matches = rank_matches(match_place, [(gop, distance)])
+        decision, match = decide(matches)
+        self.assertEqual(decision, "candidate")
+        self.assertIsNotNone(match)
+        self.assertGreaterEqual(match.score, 0.55)
+
+    def test_parenthetical_variant_is_candidate_not_auto(self):
+        matches = rank_matches(
+            place(name="Testort (Zweitname)"), [(poi(), 5.0)]
+        )
+        decision, match = decide(matches)
+        self.assertEqual(decision, "candidate")
+        self.assertTrue(match.variant)
 
     def test_address_names_are_ignored(self):
         for name in ("Veilchenweg", "Perlacher Straße 55", "A 14", "12"):
@@ -456,6 +544,137 @@ class SyncTest(unittest.TestCase):
                 summary = net_scan(paths, sleep=0.0, log=lambda _: None)
             self.assertEqual(summary.pending, 0)
             fake_nominatim.search_raw.assert_not_called()
+
+    def test_address_scan_matches_compatible_successor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            payload = [
+                {
+                    "osm_type": "node",
+                    "osm_id": 900,
+                    "lat": "48.1001",
+                    "lon": "11.5001",
+                    "display_name": "Neuer Name, Teststraße 1, München",
+                    "category": "amenity",
+                    "type": "cafe",
+                    "extratags": {"amenity": "cafe"},
+                    "address": {"city": "München"},
+                }
+            ]
+            fake_nominatim = mock.Mock()
+            fake_nominatim.search_raw.return_value = payload
+            with mock.patch(
+                "spot_history.connectors.osm.sync.NominatimClient",
+                return_value=fake_nominatim,
+            ):
+                summary = address_scan(paths, sleep=0.0, log=lambda _: None)
+            self.assertEqual(summary.queries, 1)
+            self.assertEqual(summary.candidates, 1)
+            candidates = identity.load_osm_candidates(paths.place_identity_db)
+            self.assertEqual(candidates[0]["osm_id"], 900)
+            self.assertEqual(candidates[0]["reason"], "address_match")
+
+    def test_address_scan_rejects_incompatible_category(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            payload = [
+                {
+                    "osm_type": "node",
+                    "osm_id": 901,
+                    "lat": "48.1001",
+                    "lon": "11.5001",
+                    "display_name": "Kleiderladen, Teststraße 1, München",
+                    "category": "shop",
+                    "type": "clothes",
+                    "extratags": {"shop": "clothes"},
+                    "address": {"city": "München"},
+                }
+            ]
+            fake_nominatim = mock.Mock()
+            fake_nominatim.search_raw.return_value = payload
+            with mock.patch(
+                "spot_history.connectors.osm.sync.NominatimClient",
+                return_value=fake_nominatim,
+            ):
+                summary = address_scan(paths, sleep=0.0, log=lambda _: None)
+            self.assertEqual(summary.candidates, 0)
+            self.assertEqual(identity.load_osm_candidates(paths.place_identity_db), [])
+
+    def test_contact_scan_matches_website(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"contact": ContactConnector()}, paths, log=lambda _: None)
+            conn = osm_db.open_db(paths.connector_dir("osm") / "osm.db")
+            osm_db.save_pois(
+                conn,
+                [
+                    osm_db.Poi(
+                        osm_type="node",
+                        osm_id=902,
+                        name="Testort Neu",
+                        lat=48.1001,
+                        lng=11.5,
+                        tags={
+                            "amenity": "cafe",
+                            "website": "https://testort.example/kontakt",
+                        },
+                    )
+                ],
+            )
+            conn.close()
+            summary = contact_scan(paths, log=lambda _: None)
+            self.assertEqual(summary.candidates, 1)
+            candidates = identity.load_osm_candidates(paths.place_identity_db)
+            self.assertEqual(candidates[0]["osm_id"], 902)
+            self.assertEqual(candidates[0]["reason"], "website_match")
+
+    def test_mark_missing_coords_sets_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"nocoord": NoCoordConnector()}, paths, log=lambda _: None)
+            self.assertEqual(mark_missing_coords(paths, log=lambda _: None), 1)
+            states = identity.load_osm_states(paths.place_identity_db)
+            self.assertEqual(states[("nocoord", "n1")]["state"], "no_coords")
+            build_index({"nocoord": NoCoordConnector()}, paths, log=lambda _: None)
+            places = load_index_places(paths.index_db)
+            self.assertEqual(places[0].place_state, "no_coords")
+
+    def test_deep_scan_runs_stages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            osm_db.open_db(paths.connector_dir("osm") / "osm.db").close()
+            payload = [
+                {
+                    "osm_type": "node",
+                    "osm_id": 903,
+                    "lat": "48.1001",
+                    "lon": "11.5001",
+                    "display_name": "Testort, Teststraße 1, München",
+                    "category": "amenity",
+                    "type": "cafe",
+                    "extratags": {"amenity": "cafe"},
+                    "address": {"city": "München"},
+                }
+            ]
+            fake_nominatim = mock.Mock()
+            fake_nominatim.search_raw.return_value = payload
+            with mock.patch(
+                "spot_history.connectors.osm.sync.NominatimClient",
+                return_value=fake_nominatim,
+            ):
+                summary = deep_scan(
+                    paths,
+                    sleep=0.0,
+                    contact_scan_enabled=False,
+                    log=lambda _: None,
+                )
+            self.assertIsNotNone(summary.rematch)
+            self.assertIsNotNone(summary.name)
+            self.assertIsNotNone(summary.address)
+            self.assertIsNone(summary.contacts)
 
     def test_rematch_uses_cached_pois_without_queries(self):
         with tempfile.TemporaryDirectory() as tmp:

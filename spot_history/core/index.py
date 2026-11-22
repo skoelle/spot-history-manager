@@ -12,6 +12,7 @@ from .identity import (
     load_aliases,
     load_osm_assignments,
     load_osm_candidate_keys,
+    load_osm_states,
     local_key,
     record_aliases,
 )
@@ -176,7 +177,9 @@ CREATE TABLE canonical_places (
     osm_lng REAL,
     match_status TEXT NOT NULL DEFAULT 'local',
     place_kind TEXT NOT NULL DEFAULT 'venue',
-    has_osm_candidate INTEGER NOT NULL DEFAULT 0
+    has_osm_candidate INTEGER NOT NULL DEFAULT 0,
+    place_state TEXT NOT NULL DEFAULT 'open',
+    place_state_reason TEXT
 );
 
 CREATE TABLE canonical_aliases (
@@ -432,6 +435,7 @@ def build_index(
         osm_coords = load_osm_coords(paths.osm_db)
         osm_cities = load_osm_cities(paths.osm_db)
         osm_candidate_keys = load_osm_candidate_keys(paths.place_identity_db)
+        osm_states = load_osm_states(paths.place_identity_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
@@ -481,6 +485,10 @@ def build_index(
         canonical_by_id: dict[int, object] = {}
         alias_map: dict[str, str] = {}
         link_total = 0
+        state_counts = {
+            state: 0
+            for state in ("open", "no_osm", "closed", "no_coords", "ignored")
+        }
         for canonical in canonical_places:
             lat, lng = canonical.coords
             osm_lat = osm_lng = None
@@ -493,13 +501,26 @@ def build_index(
             has_osm_candidate = int(
                 any(member.key in osm_candidate_keys for member in canonical.members)
             )
+            place_state = "open"
+            place_state_reason = None
+            for member in canonical.sorted_members:
+                state_info = osm_states.get(member.key)
+                if state_info:
+                    place_state = state_info["state"]
+                    place_state_reason = (
+                        state_info.get("reason") or state_info.get("note")
+                    )
+                    break
+            state_counts[place_state] = state_counts.get(place_state, 0) + 1
             cursor = conn.execute(
                 "INSERT INTO canonical_places (canonical_key, name, lat, lng, "
                 "category, category_group, category_group_source, address, "
                 "city, state, postal_code, country_code, primary_source, "
                 "sources_json, source_count, osm_type, osm_id, osm_lat, osm_lng, "
-                "match_status, place_kind, has_osm_candidate) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "match_status, place_kind, has_osm_candidate, place_state, "
+                "place_state_reason) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
                     canonical.name,
@@ -523,6 +544,8 @@ def build_index(
                     canonical.match_status,
                     canonical.place_kind,
                     has_osm_candidate,
+                    place_state,
+                    place_state_reason,
                 ),
             )
             for member in canonical.members:
@@ -717,6 +740,7 @@ def build_index(
         "address_places": sum(
             1 for place in canonical_places if place.place_kind == "address"
         ),
+        "place_states": state_counts,
         "without_osm_suggestion": sum(
             1
             for place in canonical_places

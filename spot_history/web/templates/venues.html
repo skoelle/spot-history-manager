@@ -93,6 +93,17 @@
                 <option value="1" {% if query.without_candidate %}selected{% endif %}>Ohne Vorschlag ({{ match_counts.without_suggestion }})</option>
             </select>
         </label>
+        <label class="field">
+            <span>Status</span>
+            <select name="state">
+                <option value="" {% if not query.state %}selected{% endif %}>Alle</option>
+                <option value="open" {% if query.state == 'open' %}selected{% endif %}>Offen ({{ match_counts.states.open }})</option>
+                <option value="no_osm" {% if query.state == 'no_osm' %}selected{% endif %}>Kein OSM-Objekt ({{ match_counts.states.no_osm }})</option>
+                <option value="closed" {% if query.state == 'closed' %}selected{% endif %}>Geschlossen ({{ match_counts.states.closed }})</option>
+                <option value="no_coords" {% if query.state == 'no_coords' %}selected{% endif %}>Ohne Geodaten ({{ match_counts.states.no_coords }})</option>
+                <option value="ignored" {% if query.state == 'ignored' %}selected{% endif %}>Ignoriert ({{ match_counts.states.ignored }})</option>
+            </select>
+        </label>
         <label class="field field-search">
             <span>Suche</span>
             <input type="search" name="q" value="{{ query.q }}" placeholder="Ort, Kategorie, Adresse, Stadt ...">
@@ -130,6 +141,10 @@
                         {% elif venue.match_status == 'conflict' %}<span class="badge derived">Konflikt</span>
                         {% else %}<span class="badge">lokal</span>{% endif %}
                         {% if venue.has_osm_candidate %}<span class="badge derived">Vorschlag</span>{% endif %}
+                        {% if venue.place_state == 'no_osm' %}<span class="badge derived">kein OSM</span>
+                        {% elif venue.place_state == 'closed' %}<span class="badge derived">geschlossen</span>
+                        {% elif venue.place_state == 'no_coords' %}<span class="badge derived">ohne Geodaten</span>
+                        {% elif venue.place_state == 'ignored' %}<span class="badge derived">ignoriert</span>{% endif %}
                     </td>
                     <td>{{ venue.city or '—' }}</td>
                     <td>

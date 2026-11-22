@@ -59,7 +59,10 @@ class OsmConnector(BaseConnector):
             help="offene Orte offline gegen den POI-Cache matchen",
         )
         rematch_parser.add_argument(
-            "--radius", type=int, default=120, help="Suchradius in Metern (default: 120)"
+            "--radius",
+            type=int,
+            default=500,
+            help="maximale Kandidaten-Distanz in Metern (default: 500)",
         )
         rematch_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte")
         rematch_parser.add_argument(
@@ -92,6 +95,75 @@ class OsmConnector(BaseConnector):
         net_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
         net_parser.set_defaults(func=self.run)
 
+        address_parser = commands.add_parser(
+            "address-scan",
+            parents=[common],
+            help="Nachfolger an derselben Adresse über Nominatim suchen",
+        )
+        address_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte")
+        address_parser.add_argument(
+            "--max-distance",
+            type=float,
+            default=150.0,
+            help="maximale Distanz am selben Standort in Metern",
+        )
+        address_parser.add_argument(
+            "--force", action="store_true", help="Nominatim-Cache ignorieren"
+        )
+        address_parser.add_argument(
+            "--dry-run", action="store_true", help="nur anzeigen, nichts schreiben"
+        )
+        address_parser.add_argument(
+            "--sleep", type=float, default=1.1, help="Pause zwischen Nominatim-Anfragen"
+        )
+        address_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
+        address_parser.set_defaults(func=self.run)
+
+        contact_parser = commands.add_parser(
+            "contact-scan",
+            parents=[common],
+            help="Venues über Website/Telefon/E-Mail im POI-Cache matchen",
+        )
+        contact_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte")
+        contact_parser.add_argument(
+            "--radius",
+            type=float,
+            default=2000.0,
+            help="Suchradius in Metern (default: 2000)",
+        )
+        contact_parser.add_argument(
+            "--dry-run", action="store_true", help="nur anzeigen, nichts schreiben"
+        )
+        contact_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
+        contact_parser.set_defaults(func=self.run)
+
+        deep_parser = commands.add_parser(
+            "deep-scan",
+            parents=[common],
+            help="Rematch, Name-, Adress- und Contact-Scan nacheinander ausführen",
+        )
+        deep_parser.add_argument("--limit", type=int, help="maximale Anzahl Orte je Stufe")
+        deep_parser.add_argument(
+            "--dry-run", action="store_true", help="nur anzeigen, nichts schreiben"
+        )
+        deep_parser.add_argument("--skip-name", action="store_true", help="Name-Scan auslassen")
+        deep_parser.add_argument(
+            "--skip-address", action="store_true", help="Adress-Scan auslassen"
+        )
+        deep_parser.add_argument(
+            "--skip-contacts", action="store_true", help="Contact-Scan auslassen"
+        )
+        deep_parser.add_argument(
+            "--no-mark-no-coords",
+            action="store_true",
+            help="Venues ohne Geodaten nicht automatisch markieren",
+        )
+        deep_parser.add_argument(
+            "--sleep", type=float, default=1.1, help="Pause zwischen Nominatim-Anfragen"
+        )
+        deep_parser.add_argument("--verbose", action="store_true", help="mehr Ausgaben")
+        deep_parser.set_defaults(func=self.run)
+
         stats_parser = commands.add_parser(
             "stats", parents=[common], help="Cache- und Zuordnungszahlen anzeigen"
         )
@@ -110,6 +182,12 @@ class OsmConnector(BaseConnector):
             return self._rematch(args, paths)
         if args.command == "net-scan":
             return self._net_scan(args, paths)
+        if args.command == "address-scan":
+            return self._address_scan(args, paths)
+        if args.command == "contact-scan":
+            return self._contact_scan(args, paths)
+        if args.command == "deep-scan":
+            return self._deep_scan(args, paths)
         print(f"Unbekannter osm-Befehl: {args.command}")
         return 2
 
@@ -197,6 +275,100 @@ class OsmConnector(BaseConnector):
         print(f"Fehler:            {summary.errors}")
         if args.dry_run:
             print("Dry-Run: keine Kandidaten geschrieben.")
+        print("Danach: python3 -m spot_history index build")
+        return 0
+
+    def _address_scan(self, args: argparse.Namespace, paths) -> int:
+        from .sync import address_scan
+
+        try:
+            summary = address_scan(
+                paths,
+                limit=args.limit,
+                max_distance_m=args.max_distance,
+                force=args.force,
+                dry_run=args.dry_run,
+                sleep=args.sleep,
+                verbose=args.verbose,
+                osm_db_path=self._db_path(args, paths),
+            )
+        except FileNotFoundError as exc:
+            print(f"Fehler: {exc}")
+            return 1
+        print(f"Orte gesamt:       {summary.places}")
+        print(f"Offen:             {summary.pending}")
+        print(f"Übersprungen:      {summary.skipped}")
+        print(f"Abfragen:          {summary.queries} neu, {summary.cached_queries} aus Cache")
+        print(f"Kandidaten:        {summary.candidates}")
+        print(f"Ohne Treffer:      {summary.none}")
+        print(f"Fehler:            {summary.errors}")
+        if args.dry_run:
+            print("Dry-Run: keine Kandidaten geschrieben.")
+        print("Danach: python3 -m spot_history index build")
+        return 0
+
+    def _contact_scan(self, args: argparse.Namespace, paths) -> int:
+        from .sync import contact_scan
+
+        try:
+            summary = contact_scan(
+                paths,
+                limit=args.limit,
+                radius=args.radius,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                osm_db_path=self._db_path(args, paths),
+            )
+        except FileNotFoundError as exc:
+            print(f"Fehler: {exc}")
+            return 1
+        print(f"Orte gesamt:       {summary.places}")
+        print(f"Offen:             {summary.pending}")
+        print(f"Übersprungen:      {summary.skipped}")
+        print(f"Kandidaten:        {summary.candidates}")
+        print(f"Ohne Treffer:      {summary.none}")
+        if args.dry_run:
+            print("Dry-Run: keine Kandidaten geschrieben.")
+        print("Danach: python3 -m spot_history index build")
+        return 0
+
+    def _deep_scan(self, args: argparse.Namespace, paths) -> int:
+        from .sync import deep_scan
+
+        try:
+            summary = deep_scan(
+                paths,
+                limit=args.limit,
+                dry_run=args.dry_run,
+                name_scan_enabled=not args.skip_name,
+                address_scan_enabled=not args.skip_address,
+                contact_scan_enabled=not args.skip_contacts,
+                mark_no_coords=not args.no_mark_no_coords,
+                sleep=args.sleep,
+                verbose=args.verbose,
+                osm_db_path=self._db_path(args, paths),
+            )
+        except FileNotFoundError as exc:
+            print(f"Fehler: {exc}")
+            return 1
+        stages = (
+            ("Rematch", summary.rematch),
+            ("Name", summary.name),
+            ("Adresse", summary.address),
+            ("Kontakt", summary.contacts),
+        )
+        for label, stage in stages:
+            if stage is None:
+                continue
+            print(
+                f"{label:<8} geprüft={getattr(stage, 'pending', 0)} "
+                f"auto={getattr(stage, 'auto_matched', 0)} "
+                f"kandidaten={getattr(stage, 'candidates', 0)} "
+                f"ohne Treffer={getattr(stage, 'none', 0)}"
+            )
+        print(f"Ohne Geodaten markiert: {summary.no_coords}")
+        if args.dry_run:
+            print("Dry-Run: keine Kandidaten/Status geschrieben.")
         print("Danach: python3 -m spot_history index build")
         return 0
 
