@@ -65,6 +65,7 @@ APPLY_FIELDS = (
     "address",
     "city",
     "postal_code",
+    "name",
     "confidence",
     "note",
 )
@@ -471,6 +472,7 @@ def _apply_rows(
             address = None
             city = None
             postal_code = None
+            name_override = None
             if action == "assign":
                 osm_type, osm_id = identity.parse_osm_ref(
                     (row.get("osm") or "").strip()
@@ -550,6 +552,18 @@ def _apply_rows(
                         postal_code=postal_code,
                         note=(row.get("note") or "").strip() or None,
                     )
+            elif action == "name":
+                name_override = (row.get("name") or "").strip()
+                if not name_override:
+                    raise ValueError("Leerer Name")
+                if not dry_run:
+                    identity.set_manual_name(
+                        paths.place_identity_db,
+                        source,
+                        source_place_id,
+                        name_override,
+                        note=(row.get("note") or "").strip() or None,
+                    )
             else:
                 raise ValueError(f"Unbekannte Aktion: {action!r}")
             summary.applied += 1
@@ -566,6 +580,7 @@ def _apply_rows(
                     "address": address,
                     "city": city,
                     "postal_code": postal_code,
+                    "name": name_override,
                     "confidence": (row.get("confidence") or "").strip() or None,
                     "note": (row.get("note") or "").strip() or None,
                 }

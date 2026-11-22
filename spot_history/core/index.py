@@ -13,6 +13,7 @@ from .identity import (
     load_aliases,
     load_manual_addresses,
     load_manual_coords,
+    load_manual_names,
     load_osm_assignments,
     load_osm_candidate_keys,
     load_osm_states,
@@ -470,6 +471,7 @@ def build_index(
         osm_states = load_osm_states(paths.place_identity_db)
         manual_coords = load_manual_coords(paths.place_identity_db)
         manual_addresses = load_manual_addresses(paths.place_identity_db)
+        manual_names = load_manual_names(paths.place_identity_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
@@ -542,6 +544,12 @@ def build_index(
                     manual_lat = manual["lat"]
                     manual_lng = manual["lng"]
                     break
+            name_override = canonical.name
+            for member in canonical.sorted_members:
+                manual_name = manual_names.get(member.key)
+                if manual_name:
+                    name_override = manual_name["name"]
+                    break
             address_override = canonical.address
             city_override = canonical.city
             postal_override = canonical.postal_code
@@ -577,7 +585,7 @@ def build_index(
                 "?, ?, ?, ?, ?, ?, ?)",
                 (
                     canonical.canonical_key,
-                    canonical.name,
+                    name_override,
                     lat,
                     lng,
                     canonical.category,
@@ -798,6 +806,7 @@ def build_index(
             1 for place in canonical_places if place.place_kind == "address"
         ),
         "manual_addresses": len(manual_addresses),
+        "manual_names": len(manual_names),
         "place_states": state_counts,
         "without_osm_suggestion": sum(
             1

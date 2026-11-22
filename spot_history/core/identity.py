@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS place_manual_address (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (source, source_place_id)
 );
+
+CREATE TABLE IF NOT EXISTS place_manual_name (
+    source TEXT NOT NULL,
+    source_place_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    note TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, source_place_id)
+);
 """
 
 
@@ -588,6 +597,74 @@ def delete_manual_address(path: Path, source: str, source_place_id: str) -> bool
         with conn:
             cursor = conn.execute(
                 "DELETE FROM place_manual_address "
+                "WHERE source=? AND source_place_id=?",
+                (source, source_place_id),
+            )
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_manual_name(
+    path: Path,
+    source: str,
+    source_place_id: str,
+    name: str,
+    *,
+    note: str | None = None,
+) -> None:
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValueError("Leerer Name")
+    stamp = now_iso()
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO place_manual_name "
+                "(source, source_place_id, name, note, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, source_place_id) DO UPDATE SET "
+                "name=excluded.name, note=excluded.note, "
+                "updated_at=excluded.updated_at",
+                (source, source_place_id, clean_name, note, stamp),
+            )
+    finally:
+        conn.close()
+
+
+def load_manual_names(path: Path) -> dict[tuple[str, str], dict]:
+    conn = _read_connection(path)
+    if conn is None:
+        return {}
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT source, source_place_id, name, note, updated_at "
+                "FROM place_manual_name"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    return {
+        (row["source"], row["source_place_id"]): {
+            "name": row["name"],
+            "note": row["note"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    }
+
+
+def delete_manual_name(path: Path, source: str, source_place_id: str) -> bool:
+    if not path.exists():
+        return False
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM place_manual_name "
                 "WHERE source=? AND source_place_id=?",
                 (source, source_place_id),
             )

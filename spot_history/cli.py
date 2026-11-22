@@ -89,6 +89,12 @@ def _run_places(args: argparse.Namespace, connectors) -> int:
         return _run_clear_address(args, paths, connectors)
     if command == "addresses":
         return _run_manual_addresses(args, paths)
+    if command == "set-name":
+        return _run_set_name(args, paths, connectors)
+    if command == "clear-name":
+        return _run_clear_name(args, paths, connectors)
+    if command == "names":
+        return _run_manual_names(args, paths)
     if command == "research-worklist":
         return _run_research_worklist(args, paths)
     if command == "apply-research":
@@ -307,6 +313,7 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     manual_addresses_count = len(
         identity.load_manual_addresses(paths.place_identity_db)
     )
+    manual_names_count = len(identity.load_manual_names(paths.place_identity_db))
     manual_merges = sum(1 for rule in rules if rule.action == "merge")
     standalone = sum(1 for rule in rules if rule.action == "standalone")
     print(f"Quell-Orte:        {counts['places']}")
@@ -319,6 +326,7 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     print(f"OSM-Kandidaten:    {candidate_places}")
     print(f"Manuelle Coords:   {manual_coords_count}")
     print(f"Manuelle Adressen: {manual_addresses_count}")
+    print(f"Manuelle Namen:    {manual_names_count}")
     print(f"Ohne Vorschlag:    {without_suggestion}")
     for state in ("open", "no_osm", "closed", "no_coords", "ignored"):
         print(f"Status {state:<10} {state_counts.get(state, 0)}")
@@ -654,6 +662,60 @@ def _run_manual_addresses(args: argparse.Namespace, paths) -> int:
         print(
             f"{row['source']}:{row['source_place_id']}  "
             f"{', '.join(parts)}  {row.get('note') or ''}"
+        )
+    print(f"Gesamt: {len(rows)}")
+    return 0
+
+
+def _run_set_name(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+        identity.set_manual_name(
+            paths.place_identity_db,
+            source,
+            source_place_id,
+            args.name,
+            note=args.note,
+        )
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    print(f"Name gespeichert: {args.place} -> {args.name}")
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_clear_name(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    deleted = identity.delete_manual_name(
+        paths.place_identity_db, source, source_place_id
+    )
+    print(
+        f"Name entfernt: {args.place}"
+        if deleted
+        else f"Kein manueller Name vorhanden: {args.place}"
+    )
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_manual_names(args: argparse.Namespace, paths) -> int:
+    rows = [
+        {"source": source, "source_place_id": place_id, **info}
+        for (source, place_id), info in sorted(
+            identity.load_manual_names(paths.place_identity_db).items()
+        )
+        if not args.source or source == args.source
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    for row in rows:
+        print(
+            f"{row['source']}:{row['source_place_id']}  {row['name']}  "
+            f"{row.get('note') or ''}"
         )
     print(f"Gesamt: {len(rows)}")
     return 0
@@ -1070,6 +1132,36 @@ def main(argv: list[str] | None = None) -> int:
     addresses_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
     addresses_parser.add_argument("--json", action="store_true")
     addresses_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    set_name_parser = place_commands.add_parser(
+        "set-name", help="manuellen Namen für einen Quell-Ort setzen"
+    )
+    set_name_parser.add_argument("place", help="source:id des Quell-Orts")
+    set_name_parser.add_argument("name", help="neuer Name")
+    set_name_parser.add_argument("--note")
+    set_name_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    set_name_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    set_name_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    clear_name_parser = place_commands.add_parser(
+        "clear-name", help="manuellen Namen entfernen"
+    )
+    clear_name_parser.add_argument("place", help="source:id des Quell-Orts")
+    clear_name_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    clear_name_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    clear_name_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    names_parser = place_commands.add_parser(
+        "names", help="gesetzte manuelle Namen anzeigen"
+    )
+    names_parser.add_argument("--source", help="nur diese Quelle")
+    names_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    names_parser.add_argument("--json", action="store_true")
+    names_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     coords_parser = place_commands.add_parser(
         "coords", help="gesetzte manuelle Koordinaten anzeigen"

@@ -9,11 +9,13 @@ from pathlib import Path
 from spot_history.core.identity import (
     delete_manual_address,
     delete_manual_coords,
+    delete_manual_name,
     delete_osm_assignment,
     delete_osm_state,
     load_aliases,
     load_manual_addresses,
     load_manual_coords,
+    load_manual_names,
     load_osm_assignments,
     load_osm_states,
     local_key,
@@ -21,6 +23,7 @@ from spot_history.core.identity import (
     record_aliases,
     set_manual_address,
     set_manual_coords,
+    set_manual_name,
     set_osm_state,
     upsert_osm_assignment,
     validate_osm,
@@ -138,6 +141,19 @@ class IdentityTest(unittest.TestCase):
             self.assertTrue(delete_manual_address(path, "google", "g1"))
             self.assertEqual(load_manual_addresses(path), {})
             self.assertFalse(delete_manual_address(path, "google", "g1"))
+
+    def test_manual_name_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "places" / "identity.db"
+            self.assertEqual(load_manual_names(path), {})
+            set_manual_name(path, "foursquare", "v1", "Backstage", note="test")
+            stored = load_manual_names(path)
+            self.assertEqual(stored[("foursquare", "v1")]["name"], "Backstage")
+            with self.assertRaises(ValueError):
+                set_manual_name(path, "foursquare", "v1", " ")
+            self.assertTrue(delete_manual_name(path, "foursquare", "v1"))
+            self.assertEqual(load_manual_names(path), {})
+            self.assertFalse(delete_manual_name(path, "foursquare", "v1"))
 
 
 if __name__ == "__main__":

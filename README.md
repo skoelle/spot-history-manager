@@ -189,7 +189,7 @@ The deep scan and research import run a backup first and rebuild the index
 afterwards.
 
 The Sync page also has a paste form for reviewed research decisions. Paste CSV
-rows with `ref,action,target,osm,state,lat,lng,address,city,postal_code,confidence,note`,
+rows with `ref,action,target,osm,state,lat,lng,address,city,postal_code,name,confidence,note`,
 click "Prüfen" to validate without writing, then "Anwenden" to back up the
 databases, apply the decisions and rebuild the index.
 
@@ -578,6 +578,8 @@ python3 -m spot_history places clear-coords yelp:<place_key>
 python3 -m spot_history places set-address yelp:<place_key> \
   "Welfenstraße 24" --city München --postal-code 81541
 python3 -m spot_history places clear-address yelp:<place_key>
+python3 -m spot_history places set-name yelp:<place_key> "Backstage"
+python3 -m spot_history places clear-name yelp:<place_key>
 ```
 
 - `osm sync` only reads the index and writes exclusively to `db/osm/osm.db`
@@ -625,6 +627,8 @@ python3 -m spot_history places clear-address yelp:<place_key>
 - `places set-address` overrides the displayed address, city and postal code.
   Use it after merging a source that has the current address (e.g. a Google
   address cluster) into another place. `places clear-address` removes it.
+- `places set-name` overrides the canonical place name without touching source
+  data. `places clear-name` removes the override.
 - `--force` ignores the query cache; `--dry-run` only matches and writes no
   assignments. The place list has filters for place kind (venue/address) and
   "without OSM suggestion".

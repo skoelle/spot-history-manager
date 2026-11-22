@@ -138,6 +138,19 @@ class ResearchTest(unittest.TestCase):
             )
             self.assertEqual(stored[("yelp", "y1")]["postal_code"], "81541")
 
+    def test_apply_research_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._build(tmp, {"yelp": YelpConnector()})
+            text = (
+                "ref,action,target,osm,state,lat,lng,address,city,"
+                "postal_code,name,confidence,note\n"
+                "yelp:y1,name,,,,,,,,,Backstage,high,venue name\n"
+            )
+            summary = research.apply_research_text(paths, text)
+            self.assertEqual(summary.applied, 1)
+            stored = identity.load_manual_names(paths.place_identity_db)
+            self.assertEqual(stored[("yelp", "y1")]["name"], "Backstage")
+
     def test_write_and_apply_research(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = self._build(tmp, {"yelp": YelpConnector()})

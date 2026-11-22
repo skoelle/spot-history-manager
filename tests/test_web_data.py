@@ -12,6 +12,7 @@ from spot_history.core.config import build_paths
 from spot_history.core.identity import (
     set_manual_address,
     set_manual_coords,
+    set_manual_name,
     set_osm_state,
     upsert_osm_assignment,
     upsert_osm_candidate,
@@ -909,6 +910,23 @@ class WebDataTest(unittest.TestCase):
                 self.assertEqual(venue["address"], "Neue Straße 24")
                 self.assertEqual(venue["city"], "Berlin")
                 self.assertEqual(venue["postal_code"], "10115")
+            finally:
+                conn.close()
+
+    def test_manual_name_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = build_paths(tmp)
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            set_manual_name(
+                paths.place_identity_db, "fake", "p1", "Backstage"
+            )
+            build_index({"fake": FakeConnector()}, paths, log=lambda _: None)
+            conn = web_data.connect(paths.index_db)
+            try:
+                venue = web_data.query_venues(
+                    conn, web_data.VenueFilters(q="Backstage"), 5, 0
+                )[0]
+                self.assertEqual(venue["name"], "Backstage")
             finally:
                 conn.close()
 
