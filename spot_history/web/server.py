@@ -900,7 +900,7 @@ def sync_page(request: Request) -> HTMLResponse:
         {
             "request": request,
             "groups": sync_jobs.action_groups(paths.data_root),
-            "runs": sync_status.source_runs(paths.data_root),
+            "runs": sync_status.source_runs(paths.db_root),
             "data_root": str(paths.data_root),
         },
     )

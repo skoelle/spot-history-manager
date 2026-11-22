@@ -27,13 +27,13 @@ def make_db(path: Path, statements: list[str]) -> None:
 class SyncStatusTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.data = Path(self.tmp.name)
+        self.db_root = Path(self.tmp.name)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def test_missing_databases(self):
-        runs = sync_status.source_runs(self.data)
+        runs = sync_status.source_runs(self.db_root)
         self.assertEqual(
             set(runs), {"foursquare", "yelp", "google", "osm", "index"}
         )
@@ -43,28 +43,28 @@ class SyncStatusTests(unittest.TestCase):
 
     def test_reads_last_runs(self):
         make_db(
-            self.data / "foursquare" / "foursquare.db",
+            self.db_root / "foursquare" / "foursquare.db",
             [
                 "CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT)",
                 "INSERT INTO sync_state VALUES ('last_sync_at', '2026-11-20T18:42:00+00:00')",
             ],
         )
         make_db(
-            self.data / "yelp" / "yelp.db",
+            self.db_root / "yelp" / "yelp.db",
             [
                 "CREATE TABLE import_meta (key TEXT PRIMARY KEY, value TEXT)",
                 "INSERT INTO import_meta VALUES ('last_import_at', '2026-11-19T10:00:00+00:00')",
             ],
         )
         make_db(
-            self.data / "google" / "google.db",
+            self.db_root / "google" / "google.db",
             [
                 "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)",
                 "INSERT INTO meta VALUES ('last_import_at', '2026-11-18T09:30:00+00:00')",
             ],
         )
         make_db(
-            self.data / "osm" / "osm.db",
+            self.db_root / "osm" / "osm.db",
             [
                 "CREATE TABLE sync_runs (id INTEGER PRIMARY KEY, started_at TEXT, finished_at TEXT)",
                 "INSERT INTO sync_runs VALUES (1, '2026-11-17T08:00:00+00:00', NULL)",
@@ -72,14 +72,14 @@ class SyncStatusTests(unittest.TestCase):
             ],
         )
         make_db(
-            self.data / "index" / "index.db",
+            self.db_root / "index" / "index.db",
             [
                 "CREATE TABLE index_meta (key TEXT PRIMARY KEY, value TEXT)",
                 "INSERT INTO index_meta VALUES ('built_at', '2026-11-21T12:00:00+00:00')",
             ],
         )
 
-        runs = sync_status.source_runs(self.data)
+        runs = sync_status.source_runs(self.db_root)
         self.assertEqual(runs["foursquare"].raw, "2026-11-20T18:42:00+00:00")
         self.assertEqual(runs["foursquare"].label, "Letzter Sync")
         self.assertEqual(runs["yelp"].raw, "2026-11-19T10:00:00+00:00")
@@ -91,24 +91,24 @@ class SyncStatusTests(unittest.TestCase):
 
     def test_yelp_falls_back_to_import_runs(self):
         make_db(
-            self.data / "yelp" / "yelp.db",
+            self.db_root / "yelp" / "yelp.db",
             [
                 "CREATE TABLE import_runs (id INTEGER PRIMARY KEY, started_at TEXT, finished_at TEXT)",
                 "INSERT INTO import_runs VALUES (1, '2026-11-17T08:00:00+00:00', '2026-11-17T08:10:00+00:00')",
             ],
         )
-        runs = sync_status.source_runs(self.data)
+        runs = sync_status.source_runs(self.db_root)
         self.assertEqual(runs["yelp"].raw, "2026-11-17T08:10:00+00:00")
 
     def test_unparsable_timestamp_keeps_raw_value(self):
         make_db(
-            self.data / "google" / "google.db",
+            self.db_root / "google" / "google.db",
             [
                 "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)",
                 "INSERT INTO meta VALUES ('last_import_at', 'gestern')",
             ],
         )
-        runs = sync_status.source_runs(self.data)
+        runs = sync_status.source_runs(self.db_root)
         self.assertEqual(runs["google"].display, "gestern")
 
     def test_format_timestamp_handles_empty_values(self):

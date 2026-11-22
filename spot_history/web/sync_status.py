@@ -93,8 +93,8 @@ def _index_last(data_root: Path) -> str | None:
     )
 
 
-def source_runs(data_root: Path) -> dict[str, RunInfo]:
-    root = Path(data_root)
+def source_runs(db_root: Path) -> dict[str, RunInfo]:
+    root = Path(db_root)
     entries = (
         ("foursquare", "Letzter Sync", _foursquare_last(root)),
         ("yelp", "Letzter Import", _yelp_last(root)),
