@@ -5,4 +5,4 @@ After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/docker exec spot-history-manager python -m spot_history backup --db-root /app/db --dest /app/data/backup --keep-days 3
+ExecStart=/usr/bin/docker exec spot-history-manager python -m spot_history backup --db-root /app/db --keep-days 3

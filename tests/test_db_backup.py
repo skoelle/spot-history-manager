@@ -22,9 +22,11 @@ class DbRootTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SPOT_HISTORY_DATA_ROOT", None)
             os.environ.pop("SPOT_HISTORY_DB_ROOT", None)
+            os.environ.pop("SPOT_HISTORY_BACKUP_ROOT", None)
             paths = build_paths()
         self.assertEqual(paths.data_root, ROOT / "data")
         self.assertEqual(paths.db_root, ROOT / "db")
+        self.assertEqual(paths.backup_dir, ROOT / "data" / "backup")
         self.assertEqual(paths.index_db, ROOT / "db" / "index" / "index.db")
 
     def test_explicit_data_root_keeps_databases_below_it(self):
@@ -34,6 +36,16 @@ class DbRootTest(unittest.TestCase):
                 paths = build_paths(tmp)
             self.assertEqual(paths.data_root, Path(tmp))
             self.assertEqual(paths.db_root, Path(tmp))
+
+    def test_backup_root_env_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backup = Path(tmp) / "backups"
+            with mock.patch.dict(
+                os.environ, {"SPOT_HISTORY_BACKUP_ROOT": str(backup)}, clear=False
+            ):
+                paths = build_paths(tmp)
+                backup_dir = paths.backup_dir
+            self.assertEqual(backup_dir, backup)
 
     def test_db_root_env_wins(self):
         with tempfile.TemporaryDirectory() as tmp:

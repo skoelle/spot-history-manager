@@ -873,7 +873,7 @@ def main(argv: list[str] | None = None) -> int:
     backup_parser.add_argument("--db-root", help="SQLite-Verzeichnis (default: ./db)")
     backup_parser.add_argument(
         "--dest",
-        help="Zielverzeichnis (default: <data-root>/backup)",
+        help="Zielverzeichnis (default: SPOT_HISTORY_BACKUP_ROOT, sonst <data-root>/backup)",
     )
     backup_parser.add_argument(
         "--keep-days",

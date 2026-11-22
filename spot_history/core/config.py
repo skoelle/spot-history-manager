@@ -55,7 +55,7 @@ class Paths:
 
     @property
     def backup_dir(self) -> Path:
-        return self.data_root / "backup"
+        return _env_path("SPOT_HISTORY_BACKUP_ROOT") or self.data_root / "backup"
 
     def connector_dir(self, name: str) -> Path:
         return self.data_root / name

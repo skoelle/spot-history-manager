@@ -82,26 +82,75 @@ docker run --rm \
   -p 8345:8345 \
   -v "$PWD/db:/app/db" \
   -v "$PWD/data:/app/data" \
+  -v "$PWD/backup:/app/backup" \
+  -e SPOT_HISTORY_BACKUP_ROOT=/app/backup \
   ghcr.io/skoelle/spot-history-manager:latest
 ```
 
-Two directories are mounted; the image contains no data:
+Three directories are mounted; the image contains no data:
 
 - `db/` → `/app/db`: only the SQLite databases, keep this on the Docker host's
   local disk (default: `./db`).
-- `data/` → `/app/data`: photos, thumbnails, media, exports, sync logs, the
-  Google inbox, and backups. This can be a Synology/NAS bind mount.
+- `data/` → `/app/data`: photos, thumbnails, media, exports, the Google inbox,
+  and sync logs. This can be a Synology/NAS bind mount.
+- `backup/` → `/app/backup`: daily SQLite backups, keep this on the Docker
+  host's local disk (default: `./backup`).
 
-The container runs as UID/GID 1000, so both mounted directories must be
+The container runs as UID/GID 1000, so all mounted directories must be
 writable by that user. The web UI has no authentication; put it behind a reverse
 proxy if you expose it.
 
 For a persistent deployment, copy `docker-compose.example.yml` to
-`docker-compose.yml` and adjust the volume paths (`./db` local, `./data` on the
-NAS). The image does not contain a `.env`; Compose interpolates the tokens from
+`docker-compose.yml` and adjust the volume paths (`./db` and `./backup` local,
+`./data` on the NAS). Create `./backup` before the first start; Docker creates a
+missing bind-mount directory as root, which UID 1000 cannot write to:
+
+```bash
+mkdir -p backup
+sudo chown 1000:1000 backup
+```
+
+The image does not contain a `.env`; Compose interpolates the tokens from
 the `.env` file next to `docker-compose.yml` and passes them into the container.
-`SPOT_HISTORY_DATA_ROOT` and `SPOT_HISTORY_DB_ROOT` point the app at the two
-mounts.
+`SPOT_HISTORY_DATA_ROOT`, `SPOT_HISTORY_DB_ROOT`, and
+`SPOT_HISTORY_BACKUP_ROOT` point the app at the mounts.
+
+### 🔐 Permissions on NAS mounts
+
+Synology and other NAS systems map their own UIDs/ACLs onto bind mounts. Even if
+the web UI can read the data, a sync can fail with:
+
+```
+PermissionError: [Errno 13] Permission denied: '/app/data/sync'
+```
+
+The container runs as UID/GID 1000, so the host directories must be writable by
+that user. Check the effective ownership inside the container:
+
+```bash
+docker exec spot-history-manager id
+docker exec spot-history-manager ls -ldn /app/data /app/db /app/backup
+```
+
+Fix it on the host once (`<data>` and `<db>` are the host paths from the Compose
+file):
+
+```bash
+sudo chown -R 1000:1000 <data> <db> backup
+sudo chmod -R u+rwX,g+rwX <data> <db> backup
+```
+
+If DSM's ACLs override POSIX ownership, either grant write access to UID 1000
+via File Station/`synoacltool`, or run the container with the NAS UID/GID
+(`user: "<uid>:<gid>"` in Compose) and make `db/` and `backup/` match. The
+Python code itself does not depend on a specific UID.
+
+Verify the fix without waiting for a sync:
+
+```bash
+docker exec --user app spot-history-manager sh -c \
+  'mkdir -p /app/data/sync/logs && touch /app/data/.write-test && rm /app/data/.write-test'
+```
 
 ### 🔄 Sync buttons in the web UI
 
@@ -151,9 +200,14 @@ data/                          can live on a NAS
 ├── yelp/                      media/ + thumbs/ (HTML import)
 ├── google/inbox/              Google Timeline export input
 ├── exports/visits.geojson     map points from all sources
-├── sync/logs/                 logs of the web UI sync jobs
-└── backup/                    daily SQLite backups (see below)
+└── sync/logs/                 logs of the web UI sync jobs
+
+backup/                        local SQLite backups (default mount: /app/backup)
+└── YYYY-MM-DD/                one folder per day (see below)
 ```
+
+When `SPOT_HISTORY_BACKUP_ROOT` is not set, backups fall back to
+`data/backup/`, which also works but puts them on the NAS mount.
 
 The source databases are the source of truth. The index is rebuilt from the
 connectors and the rules in `db/places/place_rules.db` on every `index build`
@@ -163,15 +217,21 @@ and can be safely deleted. Only the rules database is persistent.
 
 `python -m spot_history backup` copies every database under `db/` with the
 SQLite online backup API (WAL-safe, also while the app is running), verifies it
-with `PRAGMA quick_check`, and writes it to `data/backup/YYYY-MM-DD/`. The
-`--keep-days` option (default `3`) keeps the three most recent daily backups.
+with `PRAGMA quick_check`, and writes it to `YYYY-MM-DD/` below
+`SPOT_HISTORY_BACKUP_ROOT` (default: `<data-root>/backup`, in Docker
+`/app/backup`). The `--keep-days` option (default `3`) keeps the three most
+recent daily backups.
 
 In Docker, run it from the host via systemd or cron, for example:
 
 ```bash
 docker exec spot-history-manager python -m spot_history backup \
-  --db-root /app/db --dest /app/data/backup --keep-days 3
+  --db-root /app/db --keep-days 3
 ```
+
+The destination comes from the container's `SPOT_HISTORY_BACKUP_ROOT`
+environment variable, so no `--dest` is needed. Use `--dest` only to override
+it for a one-off run.
 
 Example units are in `deploy/spot-history-backup.service` and
 `deploy/spot-history-backup.timer` (daily at 03:30, `Persistent=true`):
@@ -185,12 +245,12 @@ sudo systemctl enable --now spot-history-backup.timer
 Cron alternative on the host:
 
 ```cron
-30 3 * * * /usr/bin/docker exec spot-history-manager python -m spot_history backup --db-root /app/db --dest /app/data/backup --keep-days 3
+30 3 * * * /usr/bin/docker exec spot-history-manager python -m spot_history backup --db-root /app/db --keep-days 3
 ```
 
-With a NAS-backed `data/` mount, the backups end up off the Docker host.
-Retention runs after every backup; folders older than the configured number of
-days are removed.
+With the default `./backup` mount, backups stay on the Docker host while
+`data/` lives on the NAS. Retention runs after every backup; folders older than
+the configured number of days are removed.
 
 ### 🔁 Migration from the old layout
 
@@ -206,11 +266,14 @@ mv data/osm/osm.db db/osm/
 mv data/places/*.db db/places/
 mv data/index/index.db db/index/
 rmdir data/osm data/places data/index 2>/dev/null || true
-chown -R 1000:1000 db
+chown -R 1000:1000 db data
+mkdir -p backup
+chown -R 1000:1000 backup
 ```
 
-Then set `SPOT_HISTORY_DB_ROOT` (in Compose: `/app/db`) and start the
-container again. A `backup` run right before moving is recommended.
+Then set `SPOT_HISTORY_DB_ROOT` (in Compose: `/app/db`) and
+`SPOT_HISTORY_BACKUP_ROOT` (in Compose: `/app/backup`) and start the container
+again. A `backup` run right before moving is recommended.
 
 ## 🖥️ Web interface
 

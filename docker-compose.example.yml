@@ -1,11 +1,16 @@
 # Example only. Copy to docker-compose.yml and adjust the volume paths.
-# The container runs as UID/GID 1000; both mounted directories must be
+# The container runs as UID/GID 1000; all mounted directories must be
 # writable by that user.
 #
 # Layout:
-#   ./db    small SQLite databases, keep on the Docker host's local disk
-#   ./data  everything else (photos, thumbnails, exports, logs, backups),
-#           can be a Synology/NAS bind mount
+#   ./db      small SQLite databases, keep on the Docker host's local disk
+#   ./data    everything else (photos, thumbnails, exports, logs),
+#             can be a Synology/NAS bind mount
+#   ./backup  daily SQLite backups, keep on the Docker host's local disk
+#
+# Create ./backup before the first start; Docker would create a missing bind
+# mount as root and the container (UID/GID 1000) could not write to it:
+#   mkdir -p backup && sudo chown 1000:1000 backup
 #
 # Tokens are interpolated from the .env file next to this compose file:
 #   FOURSQUARE_OAUTH_TOKEN=...
@@ -21,6 +26,7 @@ services:
     volumes:
       - ./db:/app/db
       - ./data:/app/data
+      - ./backup:/app/backup
       # Optional: mount the Google Timeline file from outside and set
       # GOOGLE_TIMELINE_INBOX to the path inside the container.
       # - ./imports/google:/app/imports/google:ro
@@ -28,6 +34,7 @@ services:
       TZ: Europe/Berlin
       SPOT_HISTORY_DATA_ROOT: /app/data
       SPOT_HISTORY_DB_ROOT: /app/db
+      SPOT_HISTORY_BACKUP_ROOT: /app/backup
       FOURSQUARE_OAUTH_TOKEN: ${FOURSQUARE_OAUTH_TOKEN:-}
       FOURSQUARE_SERVICE_API_KEY: ${FOURSQUARE_SERVICE_API_KEY:-}
       FOURSQUARE_LEGACY_API_KEY: ${FOURSQUARE_LEGACY_API_KEY:-}

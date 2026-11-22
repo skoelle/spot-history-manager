@@ -1,6 +1,7 @@
 .env
 data/
 db/
+backup/
 .venv/
 __pycache__/
 *.py[cod]
