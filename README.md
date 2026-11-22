@@ -189,9 +189,9 @@ The deep scan and research import run a backup first and rebuild the index
 afterwards.
 
 The Sync page also has a paste form for reviewed research decisions. Paste CSV
-rows with `ref,action,target,osm,state,lat,lng,confidence,note`, click
-"Prüfen" to validate without writing, then "Anwenden" to back up the databases,
-apply the decisions and rebuild the index.
+rows with `ref,action,target,osm,state,lat,lng,address,city,postal_code,confidence,note`,
+click "Prüfen" to validate without writing, then "Anwenden" to back up the
+databases, apply the decisions and rebuild the index.
 
 ### 🧰 One-off commands and updates in the container
 
@@ -575,6 +575,9 @@ python3 -m spot_history places apply-research \
   data/exports/yelp-research-decisions.csv --dry-run
 python3 -m spot_history places set-coords yelp:<place_key> 48.1372 11.5755
 python3 -m spot_history places clear-coords yelp:<place_key>
+python3 -m spot_history places set-address yelp:<place_key> \
+  "Welfenstraße 24" --city München --postal-code 81541
+python3 -m spot_history places clear-address yelp:<place_key>
 ```
 
 - `osm sync` only reads the index and writes exclusively to `db/osm/osm.db`
@@ -619,6 +622,9 @@ python3 -m spot_history places clear-coords yelp:<place_key>
 - `places set-coords` stores manual coordinates for venues without an OSM
   object. The index exposes them as `manual_lat/manual_lng`; coordinate
   priority is OSM > manual > source, and the UI shows a "manuell" badge.
+- `places set-address` overrides the displayed address, city and postal code.
+  Use it after merging a source that has the current address (e.g. a Google
+  address cluster) into another place. `places clear-address` removes it.
 - `--force` ignores the query cache; `--dry-run` only matches and writes no
   assignments. The place list has filters for place kind (venue/address) and
   "without OSM suggestion".

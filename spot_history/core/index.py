@@ -11,6 +11,7 @@ from ..connectors.base import BaseConnector
 from .config import Paths
 from .identity import (
     load_aliases,
+    load_manual_addresses,
     load_manual_coords,
     load_osm_assignments,
     load_osm_candidate_keys,
@@ -468,6 +469,7 @@ def build_index(
         osm_candidate_keys = load_osm_candidate_keys(paths.place_identity_db)
         osm_states = load_osm_states(paths.place_identity_db)
         manual_coords = load_manual_coords(paths.place_identity_db)
+        manual_addresses = load_manual_addresses(paths.place_identity_db)
         persistent_aliases = load_aliases(paths.place_identity_db)
         canonical_places, candidates = resolve_canonical_places(
             source_places.values(),
@@ -540,6 +542,18 @@ def build_index(
                     manual_lat = manual["lat"]
                     manual_lng = manual["lng"]
                     break
+            address_override = canonical.address
+            city_override = canonical.city
+            postal_override = canonical.postal_code
+            for member in canonical.sorted_members:
+                manual_address = manual_addresses.get(member.key)
+                if manual_address:
+                    address_override = manual_address["address"]
+                    city_override = manual_address["city"] or city_override
+                    postal_override = (
+                        manual_address["postal_code"] or postal_override
+                    )
+                    break
             place_state = "open"
             place_state_reason = None
             for member in canonical.sorted_members:
@@ -569,10 +583,10 @@ def build_index(
                     canonical.category,
                     canonical.category_group,
                     canonical.category_group_source,
-                    canonical.address,
-                    canonical.city,
+                    address_override,
+                    city_override,
                     canonical.state,
-                    canonical.postal_code,
+                    postal_override,
                     canonical.country_code,
                     canonical.primary_source,
                     json.dumps(canonical.sources, ensure_ascii=False),
@@ -783,6 +797,7 @@ def build_index(
         "address_places": sum(
             1 for place in canonical_places if place.place_kind == "address"
         ),
+        "manual_addresses": len(manual_addresses),
         "place_states": state_counts,
         "without_osm_suggestion": sum(
             1

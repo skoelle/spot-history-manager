@@ -118,6 +118,26 @@ class ResearchTest(unittest.TestCase):
                 identity.load_osm_assignments(paths.place_identity_db), {}
             )
 
+    def test_apply_research_address(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._build(tmp, {"yelp": YelpConnector()})
+            text = (
+                "ref,action,target,osm,state,lat,lng,address,city,"
+                "postal_code,confidence,note\n"
+                "yelp:y1,address,,,,,,Welfenstraße 24,München,81541,high,office\n"
+            )
+            preview = research.apply_research_text(paths, text, dry_run=True)
+            self.assertEqual(preview.applied, 1)
+            self.assertEqual(preview.actions[0]["address"], "Welfenstraße 24")
+            self.assertEqual(identity.load_manual_addresses(paths.place_identity_db), {})
+            summary = research.apply_research_text(paths, text)
+            self.assertEqual(summary.applied, 1)
+            stored = identity.load_manual_addresses(paths.place_identity_db)
+            self.assertEqual(
+                stored[("yelp", "y1")]["address"], "Welfenstraße 24"
+            )
+            self.assertEqual(stored[("yelp", "y1")]["postal_code"], "81541")
+
     def test_write_and_apply_research(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = self._build(tmp, {"yelp": YelpConnector()})

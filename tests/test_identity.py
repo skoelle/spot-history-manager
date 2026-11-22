@@ -7,16 +7,19 @@ import unittest
 from pathlib import Path
 
 from spot_history.core.identity import (
+    delete_manual_address,
     delete_manual_coords,
     delete_osm_assignment,
     delete_osm_state,
     load_aliases,
+    load_manual_addresses,
     load_manual_coords,
     load_osm_assignments,
     load_osm_states,
     local_key,
     parse_osm_ref,
     record_aliases,
+    set_manual_address,
     set_manual_coords,
     set_osm_state,
     upsert_osm_assignment,
@@ -110,6 +113,31 @@ class IdentityTest(unittest.TestCase):
             self.assertTrue(delete_manual_coords(path, "yelp", "y1"))
             self.assertEqual(load_manual_coords(path), {})
             self.assertFalse(delete_manual_coords(path, "yelp", "y1"))
+
+    def test_manual_address_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "places" / "identity.db"
+            self.assertEqual(load_manual_addresses(path), {})
+            set_manual_address(
+                path,
+                "google",
+                "g1",
+                "Welfenstraße 24",
+                city="München",
+                postal_code="81541",
+                note="current office",
+            )
+            stored = load_manual_addresses(path)
+            self.assertEqual(
+                stored[("google", "g1")]["address"], "Welfenstraße 24"
+            )
+            self.assertEqual(stored[("google", "g1")]["city"], "München")
+            self.assertEqual(stored[("google", "g1")]["postal_code"], "81541")
+            with self.assertRaises(ValueError):
+                set_manual_address(path, "google", "g1", " ")
+            self.assertTrue(delete_manual_address(path, "google", "g1"))
+            self.assertEqual(load_manual_addresses(path), {})
+            self.assertFalse(delete_manual_address(path, "google", "g1"))
 
 
 if __name__ == "__main__":

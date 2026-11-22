@@ -62,6 +62,9 @@ APPLY_FIELDS = (
     "state",
     "lat",
     "lng",
+    "address",
+    "city",
+    "postal_code",
     "confidence",
     "note",
 )
@@ -465,6 +468,9 @@ def _apply_rows(
             state = None
             lat = None
             lng = None
+            address = None
+            city = None
+            postal_code = None
             if action == "assign":
                 osm_type, osm_id = identity.parse_osm_ref(
                     (row.get("osm") or "").strip()
@@ -528,6 +534,22 @@ def _apply_rows(
                         lng,
                         note=(row.get("note") or "").strip() or None,
                     )
+            elif action == "address":
+                address = (row.get("address") or "").strip()
+                if not address:
+                    raise ValueError("Leere Adresse")
+                city = (row.get("city") or "").strip() or None
+                postal_code = (row.get("postal_code") or "").strip() or None
+                if not dry_run:
+                    identity.set_manual_address(
+                        paths.place_identity_db,
+                        source,
+                        source_place_id,
+                        address,
+                        city=city,
+                        postal_code=postal_code,
+                        note=(row.get("note") or "").strip() or None,
+                    )
             else:
                 raise ValueError(f"Unbekannte Aktion: {action!r}")
             summary.applied += 1
@@ -541,6 +563,9 @@ def _apply_rows(
                     "state": state,
                     "lat": lat,
                     "lng": lng,
+                    "address": address,
+                    "city": city,
+                    "postal_code": postal_code,
                     "confidence": (row.get("confidence") or "").strip() or None,
                     "note": (row.get("note") or "").strip() or None,
                 }

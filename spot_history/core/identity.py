@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS place_manual_coords (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (source, source_place_id)
 );
+
+CREATE TABLE IF NOT EXISTS place_manual_address (
+    source TEXT NOT NULL,
+    source_place_id TEXT NOT NULL,
+    address TEXT NOT NULL,
+    city TEXT,
+    postal_code TEXT,
+    note TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, source_place_id)
+);
 """
 
 
@@ -496,6 +507,87 @@ def delete_manual_coords(path: Path, source: str, source_place_id: str) -> bool:
         with conn:
             cursor = conn.execute(
                 "DELETE FROM place_manual_coords "
+                "WHERE source=? AND source_place_id=?",
+                (source, source_place_id),
+            )
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_manual_address(
+    path: Path,
+    source: str,
+    source_place_id: str,
+    address: str,
+    *,
+    city: str | None = None,
+    postal_code: str | None = None,
+    note: str | None = None,
+) -> None:
+    clean_address = (address or "").strip()
+    if not clean_address:
+        raise ValueError("Leere Adresse")
+    stamp = now_iso()
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO place_manual_address "
+                "(source, source_place_id, address, city, postal_code, note, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, source_place_id) DO UPDATE SET "
+                "address=excluded.address, city=excluded.city, "
+                "postal_code=excluded.postal_code, note=excluded.note, "
+                "updated_at=excluded.updated_at",
+                (
+                    source,
+                    source_place_id,
+                    clean_address,
+                    (city or "").strip() or None,
+                    (postal_code or "").strip() or None,
+                    note,
+                    stamp,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+def load_manual_addresses(path: Path) -> dict[tuple[str, str], dict]:
+    conn = _read_connection(path)
+    if conn is None:
+        return {}
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT source, source_place_id, address, city, postal_code, "
+                "note, updated_at FROM place_manual_address"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    return {
+        (row["source"], row["source_place_id"]): {
+            "address": row["address"],
+            "city": row["city"],
+            "postal_code": row["postal_code"],
+            "note": row["note"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    }
+
+
+def delete_manual_address(path: Path, source: str, source_place_id: str) -> bool:
+    if not path.exists():
+        return False
+    conn = open_identity_db(path)
+    try:
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM place_manual_address "
                 "WHERE source=? AND source_place_id=?",
                 (source, source_place_id),
             )

@@ -83,6 +83,12 @@ def _run_places(args: argparse.Namespace, connectors) -> int:
         return _run_clear_coords(args, paths, connectors)
     if command == "coords":
         return _run_manual_coords(args, paths)
+    if command == "set-address":
+        return _run_set_address(args, paths, connectors)
+    if command == "clear-address":
+        return _run_clear_address(args, paths, connectors)
+    if command == "addresses":
+        return _run_manual_addresses(args, paths)
     if command == "research-worklist":
         return _run_research_worklist(args, paths)
     if command == "apply-research":
@@ -298,6 +304,9 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
         conn.close()
     rules = place_core.load_rules(paths.place_rules_db)
     manual_coords_count = len(identity.load_manual_coords(paths.place_identity_db))
+    manual_addresses_count = len(
+        identity.load_manual_addresses(paths.place_identity_db)
+    )
     manual_merges = sum(1 for rule in rules if rule.action == "merge")
     standalone = sum(1 for rule in rules if rule.action == "standalone")
     print(f"Quell-Orte:        {counts['places']}")
@@ -309,6 +318,7 @@ def _run_place_stats(args: argparse.Namespace, paths) -> int:
     print(f"Adresspunkte:      {address_places}")
     print(f"OSM-Kandidaten:    {candidate_places}")
     print(f"Manuelle Coords:   {manual_coords_count}")
+    print(f"Manuelle Adressen: {manual_addresses_count}")
     print(f"Ohne Vorschlag:    {without_suggestion}")
     for state in ("open", "no_osm", "closed", "no_coords", "ignored"):
         print(f"Status {state:<10} {state_counts.get(state, 0)}")
@@ -579,6 +589,71 @@ def _run_manual_coords(args: argparse.Namespace, paths) -> int:
         print(
             f"{row['source']}:{row['source_place_id']}  "
             f"{row['lat']:.6f}, {row['lng']:.6f}  {row.get('note') or ''}"
+        )
+    print(f"Gesamt: {len(rows)}")
+    return 0
+
+
+def _run_set_address(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+        identity.set_manual_address(
+            paths.place_identity_db,
+            source,
+            source_place_id,
+            args.address,
+            city=args.city,
+            postal_code=args.postal_code,
+            note=args.note,
+        )
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    print(f"Adresse gespeichert: {args.place} -> {args.address}")
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_clear_address(args: argparse.Namespace, paths, connectors) -> int:
+    try:
+        source, source_place_id = place_core.parse_place_ref(args.place)
+    except ValueError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 2
+    deleted = identity.delete_manual_address(
+        paths.place_identity_db, source, source_place_id
+    )
+    print(
+        f"Adresse entfernt: {args.place}"
+        if deleted
+        else f"Keine manuelle Adresse vorhanden: {args.place}"
+    )
+    return 0 if args.no_build else _rebuild_index(args, connectors)
+
+
+def _run_manual_addresses(args: argparse.Namespace, paths) -> int:
+    rows = [
+        {"source": source, "source_place_id": place_id, **info}
+        for (source, place_id), info in sorted(
+            identity.load_manual_addresses(paths.place_identity_db).items()
+        )
+        if not args.source or source == args.source
+    ]
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    for row in rows:
+        parts = [row["address"]]
+        if row.get("postal_code") or row.get("city"):
+            parts.append(
+                " ".join(
+                    part
+                    for part in (row.get("postal_code"), row.get("city"))
+                    if part
+                )
+            )
+        print(
+            f"{row['source']}:{row['source_place_id']}  "
+            f"{', '.join(parts)}  {row.get('note') or ''}"
         )
     print(f"Gesamt: {len(rows)}")
     return 0
@@ -963,6 +1038,38 @@ def main(argv: list[str] | None = None) -> int:
         "--no-build", action="store_true", help="Index nicht sofort neu bauen"
     )
     clear_coords_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    set_address_parser = place_commands.add_parser(
+        "set-address", help="manuelle Adresse für einen Quell-Ort setzen"
+    )
+    set_address_parser.add_argument("place", help="source:id des Quell-Orts")
+    set_address_parser.add_argument("address", help="Straße und Hausnummer")
+    set_address_parser.add_argument("--city")
+    set_address_parser.add_argument("--postal-code")
+    set_address_parser.add_argument("--note")
+    set_address_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    set_address_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    set_address_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    clear_address_parser = place_commands.add_parser(
+        "clear-address", help="manuelle Adresse entfernen"
+    )
+    clear_address_parser.add_argument("place", help="source:id des Quell-Orts")
+    clear_address_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    clear_address_parser.add_argument(
+        "--no-build", action="store_true", help="Index nicht sofort neu bauen"
+    )
+    clear_address_parser.set_defaults(func=lambda args: _run_places(args, connectors))
+
+    addresses_parser = place_commands.add_parser(
+        "addresses", help="gesetzte manuelle Adressen anzeigen"
+    )
+    addresses_parser.add_argument("--source", help="nur diese Quelle")
+    addresses_parser.add_argument("--data-root", help="Zentrales Datenverzeichnis")
+    addresses_parser.add_argument("--json", action="store_true")
+    addresses_parser.set_defaults(func=lambda args: _run_places(args, connectors))
 
     coords_parser = place_commands.add_parser(
         "coords", help="gesetzte manuelle Koordinaten anzeigen"
